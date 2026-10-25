@@ -1,0 +1,11 @@
+*
+!server/__init__.py
+!server/prompts.py
+!server/print_generation.py
+!server/print_raster.py
+!printflow
+printflow/.env
+printflow/data
+printflow/tests
+printflow/products/*/assets/templates
+**/__pycache__

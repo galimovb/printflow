@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "reference_size": [
+    1086,
+    1448
+  ],
+  "angle_degrees": 12.613145072922137,
+  "top_center": [
+    0.5,
+    0.28
+  ],
+  "shirt_body_width_cm": 54.0,
+  "body_width_reference_px": 1100.0,
+  "print_width_cm": 30.0,
+  "max_print_height_cm": 39.0,
+  "templates": {
+    "white": {
+      "filename": "white-v1.png",
+      "sha256": "c07ac9d706a75041cd1bd0bdeb0014760589be4b90a35ff1f0f64a1d9690d49e"
+    },
+    "black": {
+      "filename": "black-v1.png",
+      "sha256": "4743ec0e48c90fcdc32aa7dc591f95eb94bb593f234b847dd75d8332b47cf708"
+    }
+  },
+  "notes": "Shared calibrated plane for both colours. Angle estimated from collar junctions. Fixed calibration for these templates. Physical size is visual calibration, not a camera measurement. No local deformation or shading before the AI finish."
+}

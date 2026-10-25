@@ -1,0 +1,46 @@
+"""Контракты внешних зависимостей сценариев, без SDK и товарных реализаций."""
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class HiresGenerator(Protocol):
+    async def hires_print(self, preview_png: bytes) -> bytes: ...
+
+
+class PrintGenerator(HiresGenerator, Protocol):
+    async def preview_print(self, theme: str) -> bytes: ...
+
+    async def theme_print(self, theme: dict[str, Any], direction: str, drawn: list[str]) -> bytes: ...
+
+    async def name_print(self, png: bytes) -> str: ...
+
+    async def copy_from_photo(self, photo: bytes, note: str = "") -> bytes: ...
+
+
+class Gallery(Protocol):
+    def render(self, print_png: bytes, variant: str) -> list[tuple[str, bytes]]: ...
+
+
+class Storage(Protocol):
+    def url(self, bucket: str, key: str) -> str: ...
+
+    async def put(self, bucket: str, key: str, data: bytes, content_type: str) -> str: ...
+
+    async def get(self, bucket: str, key: str) -> bytes: ...
+
+    async def exists(self, bucket: str, key: str) -> bool: ...
+
+
+class ImageFetcher(Protocol):
+    async def download(self, url: str) -> bytes: ...
+
+    async def ensure_public(self, url: str) -> None: ...
+
+
+class CardPublisher(Protocol):
+    async def publish(self, items: list[dict[str, Any]]) -> dict[str, Any]: ...
+
+
+class JsonApiClient(Protocol):
+    async def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]: ...

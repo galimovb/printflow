@@ -1,0 +1,48 @@
+# Одно приложение для всех товаров (шопперы, коврики): cd printflow && docker compose up -d --build
+# Общие S3/OpenAI — из .env футболок (TEE_ENV), свои настройки — .env (SM_*, SHOPPER_*, MOUSEPAD_*).
+# Порядок запуска: migrate применяет миграции и завершается → стартует app (API, воркеры и обработчики заказов
+# всех товаров). База задач всех товаров — один файл: SM_DATA_HOST_DIR → /data.
+# Её не удаляют ни пересборка, ни docker compose down -v.
+name: ozon-shopper-mousepad  # stable existing deployment identity; application: PrintFlow
+
+x-app: &app
+  image: ozon-shopper-mousepad
+  build:
+    context: ..
+    dockerfile: printflow/Dockerfile
+  pull_policy: build
+  env_file:
+    - ${TEE_ENV}
+    - .env
+  environment:  # важнее env_file: в контейнере слушаем все интерфейсы, база — в /data
+    SM_HOST: 0.0.0.0
+    SM_DATA_DIR: /data
+  volumes:
+    - ${SM_DATA_HOST_DIR}:/data
+
+services:
+  migrate:
+    <<: *app
+    command: ["python", "-m", "printflow.migrations"]
+    restart: "no"
+
+  app:
+    <<: *app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports: ["127.0.0.1:${SM_PORT}:${SM_PORT}"]
+    volumes:
+      - ${SM_DATA_HOST_DIR}:/data
+      - ./products/shopper/assets/templates:/app/printflow/products/shopper/assets/templates:ro
+      - ./products/shopper/config/product.json:/app/printflow/products/shopper/config/product.json:ro
+      - ./products/shopper/config/themes.json:/app/printflow/products/shopper/config/themes.json:ro
+      - ./products/mousepad/assets/templates:/app/printflow/products/mousepad/assets/templates:ro
+      - ./products/mousepad/config/product.json:/app/printflow/products/mousepad/config/product.json:ro
+      - ./products/mousepad/config/themes.json:/app/printflow/products/mousepad/config/themes.json:ro
+      - ./products/thermo/assets/templates:/app/printflow/products/thermo/assets/templates:ro
+      - ./products/thermo/config/product.json:/app/printflow/products/thermo/config/product.json:ro
+      - ./products/thermo/config/themes.json:/app/printflow/products/thermo/config/themes.json:ro
+      - ./wb_studio/config/config.json:/app/printflow/wb_studio/config/config.json:ro
+    restart: unless-stopped
+    stop_grace_period: 10m

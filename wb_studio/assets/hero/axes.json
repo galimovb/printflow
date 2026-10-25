@@ -1,0 +1,54 @@
+{
+  "white": {
+    "template_size": [
+      1086,
+      1448
+    ],
+    "collar_junctions": [
+      [
+        270,
+        111
+      ],
+      [
+        664,
+        23
+      ]
+    ],
+    "transverse_rise_degrees": 12.59,
+    "axis_top": [
+      0.5056,
+      0.3
+    ],
+    "axis_bottom": [
+      0.6694,
+      0.85
+    ],
+    "method": "Estimated collar junction landmarks; longitudinal direction perpendicular to their chord. Hem outside crop; approximate garment orientation."
+  },
+  "black": {
+    "template_size": [
+      1086,
+      1448
+    ],
+    "collar_junctions": [
+      [
+        271,
+        112
+      ],
+      [
+        668,
+        23
+      ]
+    ],
+    "transverse_rise_degrees": 12.64,
+    "axis_top": [
+      0.5081,
+      0.3
+    ],
+    "axis_bottom": [
+      0.6725,
+      0.85
+    ],
+    "method": "Estimated collar junction landmarks; longitudinal direction perpendicular to their chord. Hem outside crop; approximate garment orientation."
+  }
+}

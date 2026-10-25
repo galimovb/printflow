@@ -1,0 +1,58 @@
+# WB Studio
+
+Карточки футболок для Wildberries на основе популярных товаров WB. Публикация только после ручной проверки.
+
+## Слои
+
+```
+config/          config.json (товар, модели, размеры), themes.txt, настройки из окружения
+domain/          промпты, фильтр источников, проверка контраста чернил, константы
+infrastructure/  OpenAI (generation.py), WB: поиск, CDN, публикация (wb/),
+                 локальная отрисовка: герой, прямой эталон, инфо-слайды (rendering/),
+                 автономный запуск через очередь (local.py)
+application/     Studio (очередь: поиск → карточки → публикация), пайплайны standard и source_redraw
+api/             HTTP-роуты /api/v1/wb-studio и страница /studio/wb
+```
+
+Зависимости направлены сверху вниз: `api → application → infrastructure → domain → config`.
+
+## Алгоритмы
+
+**source_redraw** — перерисовка фото продавца:
+1. Поиск WB, галерея до 20 фото.
+2. Один запрос анализирует галерею: тема, один принт только спереди, ширина принта
+   (отказ шире `max_print_width`), аудитория, до 4 фото с людьми, название и описание.
+3. Принт извлекается один раз. Версия под цвет ткани перерисовывается только если чернила пропадут.
+   Одна общая проверка, один повтор на файл.
+4. По 4 фото на цвет параллельно: кадр с фото продавца повторяет его позу, остальные — фиксированные сцены.
+   Пол модели берётся из аудитории. Кадры 5–6 — готовые инфо-слайды.
+
+Запросов на принт: 11 (1 анализ, 1 извлечение, 1 проверка, 8 фото), +1–2 на перекраску или повтор.
+
+**standard** — принт с главного фото: герой локально по калибровке, два лайфстайл-кадра
+на прямом эталоне, флэтлей, два инфо-слайда.
+
+## Запуск
+
+```powershell
+# массовый локальный прогон по теме, без публикации и S3
+.venv/Scripts/python.exe -m printflow.scripts.wb_mass_review --fresh --count 10 --theme "футболка с собакой" --out outputs/run
+
+# очередь через API приложения
+.venv/Scripts/python.exe -m printflow.scripts.wb_batch --theme "футболка с собакой"
+
+# окно Chrome для ручного прохождения проверки WB
+.venv/Scripts/python.exe -m printflow.scripts.wb_session
+
+# пересобрать общие инфо-слайды после правки config.json → information
+.venv/Scripts/python.exe -m printflow.scripts.generate_wb_information
+```
+
+Переменные окружения — в `.env.example`. Ключи и токены хранятся только в `.env`.
+
+## Проверки
+
+```powershell
+$env:PYTHONPATH="printflow/tests;."; .venv/Scripts/python.exe -m unittest discover -s printflow/tests -p "test_wb*.py"
+ruff check printflow/wb_studio; ruff format --check printflow/wb_studio
+```

@@ -1,0 +1,47 @@
+{
+  "model": "gpt-image-2",
+  "assets": {
+    "background": {
+      "size": [
+        1200,
+        1600
+      ],
+      "mode": "RGB",
+      "kind": "full-card-scene"
+    },
+    "shirt": {
+      "size": [
+        1200,
+        1600
+      ],
+      "mode": "RGB",
+      "kind": "full-card-scene"
+    },
+    "shopper": {
+      "size": [
+        1200,
+        1600
+      ],
+      "mode": "RGB",
+      "kind": "full-card-scene"
+    },
+    "accents": {
+      "size": [
+        1086,
+        1448
+      ],
+      "mode": "RGB",
+      "kind": "three-item-flatlay",
+      "generation": "builtin imagegen; blank scene edited from user reference, shirt smoothed; text and artwork inserted by production renderer"
+    }
+  },
+  "cards": [
+    "01-cover",
+    "02-shirt",
+    "03-shopper",
+    "04-size",
+    "05-application",
+    "06-care"
+  ],
+  "backup": "D:\\NADEL_WORK\\ozon-tee\\printflow\\products\\thermo\\assets\\templates\\_backups\\f46e32636f11472d8ba84b2c1bc041d9"
+}

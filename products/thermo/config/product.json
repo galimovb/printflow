@@ -1,0 +1,251 @@
+{
+  "article_prefix": "TRM-",
+  "assortment": {
+    "mode": "single"
+  },
+  "single_size_cm": [
+    21,
+    29.7
+  ],
+  "single_sizing": "width_proportional",
+  "single_width_cm": 21,
+  "offers": {
+    "single": {
+      "ozon": {}
+    },
+    "set": {
+      "ozon": {}
+    }
+  },
+  "buckets": {
+    "prints": "trm-print",
+    "mockups": "trm-mockups",
+    "hires": "trm-high-resolution-prints"
+  },
+  "size_cm": [
+    6.5,
+    9.5
+  ],
+  "set_sizes": [
+    {
+      "key": "small",
+      "label": "МАЛЫЙ",
+      "size_cm": [
+        6.5,
+        9.5
+      ]
+    },
+    {
+      "key": "medium",
+      "label": "СРЕДНИЙ",
+      "size_cm": [
+        10,
+        14.6
+      ]
+    },
+    {
+      "key": "large",
+      "label": "БОЛЬШОЙ",
+      "size_cm": [
+        13,
+        19
+      ]
+    }
+  ],
+  "generation": {
+    "theme_drawn_limit": 60,
+    "print_area_cm": [
+      6.5,
+      9.5
+    ],
+    "preview": {
+      "size": "1024x1536",
+      "quality": "medium"
+    },
+    "reference": {
+      "size": "1024x1536",
+      "quality": "medium"
+    },
+    "hires": {
+      "size": "2048x3072",
+      "quality": "high"
+    }
+  },
+  "gallery": {
+    "comparison_row": {
+      "margin": 24,
+      "gap": 16,
+      "bottom": 1155,
+      "max_height": 590
+    },
+    "accents": {
+      "shirt": {
+        "surface_cm": [
+          52,
+          58
+        ],
+        "surface": [
+          [
+            0.18,
+            0.39
+          ],
+          [
+            0.76,
+            0.4
+          ],
+          [
+            0.77,
+            0.82
+          ],
+          [
+            0.2,
+            0.87
+          ]
+        ],
+        "center": [
+          0.42,
+          0.44
+        ]
+      },
+      "shopper": {
+        "surface_cm": [
+          34,
+          38
+        ],
+        "surface": [
+          [
+            0.65,
+            0.4
+          ],
+          [
+            0.99,
+            0.46
+          ],
+          [
+            0.91,
+            0.76
+          ],
+          [
+            0.55,
+            0.69
+          ]
+        ],
+        "center": [
+          0.52,
+          0.5
+        ]
+      },
+      "pouch": {
+        "surface_cm": [
+          22,
+          14
+        ],
+        "surface": [
+          [
+            0.025,
+            0.711
+          ],
+          [
+            0.3,
+            0.66
+          ],
+          [
+            0.37,
+            0.815
+          ],
+          [
+            0.08,
+            0.87
+          ]
+        ],
+        "center": [
+          0.5,
+          0.5
+        ]
+      }
+    },
+    "size": [
+      1200,
+      1600
+    ],
+    "mockups": {
+      "shirt": {
+        "template": "shirt-transparent.png",
+        "reference_width_cm": 52,
+        "reference_width_fraction": 0.55,
+        "center": [
+          0.5,
+          0.43
+        ]
+      },
+      "shopper": {
+        "template": "shopper-transparent.png",
+        "reference_width_cm": 34,
+        "reference_width_fraction": 0.7,
+        "center": [
+          0.5,
+          0.66
+        ],
+        "reference_height_cm": 38
+      }
+    }
+  },
+  "texts": {
+    "hero_pill": "Для одежды и аксессуаров",
+    "hero_badge": [
+      "sparkle",
+      "Декоративный",
+      "принт"
+    ]
+  },
+  "colors": {
+    "main": {
+      "name": "разноцветный",
+      "ozon_names": [
+        "разноцветный"
+      ],
+      "ozon_value": []
+    }
+  },
+  "ozon": {
+    "category_id": null,
+    "type_id": null,
+    "price": null,
+    "vat": "0",
+    "package": {
+      "width_mm": null,
+      "height_mm": null,
+      "depth_mm": null,
+      "weight_g": null
+    },
+    "attributes": [],
+    "wishes": {
+      "Бренд": "Нет бренда",
+      "Количество в упаковке": "3"
+    },
+    "name_template": "Термонаклейки для одежды {design}, набор 3 шт., 3 размера",
+    "name_fallback": "Термонаклейки для одежды и аксессуаров, набор 3 шт., 3 размера",
+    "description_template": "Набор из трёх термонаклеек с одинаковым рисунком: 6,5 × 9,5 см, 10 × 14,6 см и 13 × 19 см. По одной наклейке каждого размера. Переносится утюгом на подходящую ткань. Вещи на фотографиях показаны как примеры нанесения и в комплект не входят. Следуйте инструкции к плёнке и ярлыку ткани.",
+    "hashtags": [
+      "#термонаклейка",
+      "#декор_одежды",
+      "#термопринт"
+    ],
+    "rich": {
+      "title_template": "{design} — акцент для любимой вещи",
+      "title_fallback": "Новый акцент для одежды и аксессуаров",
+      "features": [
+        {
+          "title": "ПЕРЕНОС УТЮГОМ",
+          "text": "Следуйте инструкции к плёнке и ярлыку ткани."
+        },
+        {
+          "title": "ОДИН РИСУНОК — ТРИ РАЗМЕРА",
+          "text": "В наборе по одной термонаклейке: 6,5 × 9,5 см, 10 × 14,6 см и 13 × 19 см."
+        }
+      ],
+      "collection_title": "Выберите свой рисунок",
+      "collection_text": "Одежда и аксессуары на фото показаны для примера нанесения. В комплект входит термонаклейка."
+    }
+  }
+}

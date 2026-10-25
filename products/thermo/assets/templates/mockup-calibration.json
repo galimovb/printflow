@@ -1,0 +1,19 @@
+{
+  "shirt": {
+    "reference_width_cm": 52,
+    "reference_width_fraction": 0.44,
+    "center": [
+      0.5,
+      0.54
+    ]
+  },
+  "shopper": {
+    "reference_width_cm": 34,
+    "reference_width_fraction": 0.48,
+    "center": [
+      0.5,
+      0.67
+    ],
+    "reference_height_cm": 38
+  }
+}

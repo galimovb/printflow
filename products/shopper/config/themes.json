@@ -1,0 +1,75 @@
+{
+  "_comment": "Тематики принтов. key — ключ (задача {\"theme_key\": key}, scripts/themes.py); name — тематика; known — что уже продаётся, через запятую; captions — можно ли короткую подпись на принте; style — необязательная подсказка по стилю тематики (пусто — стиль товара).",
+  "themes": [
+    {
+      "key": "cats",
+      "name": "Коты и кошки",
+      "known": "коты с кофе, коты за компьютером, космические коты, коты-самураи, коты-меломаны, уютные котики",
+      "captions": true,
+      "style": ""
+    },
+    {
+      "key": "dogs",
+      "name": "Собаки",
+      "known": "корги, таксы, хаски, щенки, собаки в приключениях",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "russian_culture",
+      "name": "Русская культура / рашн-кор",
+      "known": "матрёшки в модных очках, девушки в кокошниках, берёзовые рощи, самовары и чаепития, народные цветочные узоры, кружевные орнаменты, хохломские мотивы, гжельские мотивы, современная русская народная графика",
+      "captions": true,
+      "style": "Contemporary Russian folk-inspired poster graphics: bold silhouettes, clean decorative linework, red and cream with contrasting dark outlines, or cobalt blue and cream. Combine folk motifs with modern everyday details and playful fashion. Vary the composition; do not copy existing commercial designs. Keep decorative patterns readable at print size. No coffee, takeaway cups or cafe props. Include people only when the selected direction explicitly calls for them; birch landscapes and ornaments must have no people."
+    },
+    {
+      "key": "animals",
+      "name": "Животные и птицы",
+      "known": "волки, лисы, еноты, капибары, совы, гуси, лошади",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "marine",
+      "name": "Морские обитатели",
+      "known": "киты, акулы, осьминоги, медузы, морские черепахи",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "dark",
+      "name": "Мрачная эстетика",
+      "known": "черепа с цветами, скелеты в бытовых ситуациях, призраки, готические замки",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "holidays",
+      "name": "Зимний уют и праздники",
+      "known": "мандарины и новогодняя ёлка, зимняя прогулка и варежки, снежный двор и санки, масленица и блины, забавные тыквы на Хэллоуин",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "food",
+      "name": "Еда и кофе",
+      "known": "кофе, пицца, суши, рамен, фрукты, уютные чаепития",
+      "captions": true,
+      "style": ""
+    },
+    {
+      "key": "games",
+      "name": "Игры и геймеры",
+      "known": "ретроигры без известных персонажей, игровые контроллеры, оригинальные пиксельные герои, настольные приключения",
+      "captions": false,
+      "style": ""
+    },
+    {
+      "key": "japan_asia",
+      "name": "Япония и Азия",
+      "known": "сакура, пагоды, самураи, карпы кои, гора Фудзи",
+      "captions": false,
+      "style": ""
+    }
+  ]
+}

@@ -1,0 +1,221 @@
+{
+  "photos_per_color": 6,
+  "colors": [
+    "white",
+    "black"
+  ],
+  "sizes": [
+    {
+      "techSize": "XS",
+      "wbSize": "44"
+    },
+    {
+      "techSize": "S",
+      "wbSize": "46"
+    },
+    {
+      "techSize": "M",
+      "wbSize": "48"
+    },
+    {
+      "techSize": "L",
+      "wbSize": "50"
+    },
+    {
+      "techSize": "XL",
+      "wbSize": "52"
+    },
+    {
+      "techSize": "XXL",
+      "wbSize": "54"
+    },
+    {
+      "techSize": "3XL",
+      "wbSize": "56"
+    }
+  ],
+  "subject_id": 192,
+  "brand": "",
+  "price": 1500,
+  "dimensions": {
+    "length": 30,
+    "width": 30,
+    "height": 1,
+    "weightBrutto": 0.2
+  },
+  "characteristics": [
+    {
+      "id": 15001138,
+      "value": [
+        "21.05.2030"
+      ]
+    },
+    {
+      "id": 15001137,
+      "value": [
+        "22.05.2026"
+      ]
+    },
+    {
+      "id": 11,
+      "value": [
+        "прямой"
+      ]
+    },
+    {
+      "id": 14177451,
+      "value": [
+        "Россия"
+      ]
+    },
+    {
+      "id": 15001136,
+      "value": [
+        "ЕАЭС RU С-UZ.АБ47.В.06021/26"
+      ]
+    },
+    {
+      "id": 23771,
+      "value": [
+        "дышащий материал",
+        "принт",
+        "воздухопроницаемость"
+      ]
+    },
+    {
+      "id": 14177450,
+      "value": [
+        "хлопок 100%"
+      ]
+    },
+    {
+      "id": 15004292,
+      "value": [
+        "14.14.30.110"
+      ]
+    },
+    {
+      "id": 48,
+      "value": [
+        "без карманов"
+      ]
+    },
+    {
+      "id": 11892,
+      "value": [
+        "Бережная стирка"
+      ]
+    },
+    {
+      "id": 6,
+      "value": [
+        "круглый"
+      ]
+    },
+    {
+      "id": 50,
+      "value": [
+        "принт"
+      ]
+    },
+    {
+      "id": 23796,
+      "value": [
+        "повседневная"
+      ]
+    },
+    {
+      "id": 15001405,
+      "value": [
+        "5"
+      ]
+    },
+    {
+      "id": 15000001,
+      "value": [
+        "6109100000"
+      ]
+    }
+  ],
+  "kiz_marked": false,
+  "image_model": "gpt-image-2.5-sunburst",
+  "image_size": "1200x1600",
+  "image_quality": "high",
+  "name_model": "gpt-4.1-mini",
+  "information": {
+    "composition": "100% ХЛОПОК",
+    "printing": "DTF-ПЕЧАТЬ",
+    "tolerance_cm": 2,
+    "measurements": [
+      [
+        "XS",
+        64,
+        45,
+        19
+      ],
+      [
+        "S",
+        66,
+        48,
+        20
+      ],
+      [
+        "M",
+        68,
+        51,
+        21
+      ],
+      [
+        "L",
+        70,
+        54,
+        22
+      ],
+      [
+        "XL",
+        72,
+        57,
+        23
+      ],
+      [
+        "2XL",
+        74,
+        60,
+        24
+      ],
+      [
+        "3XL",
+        76,
+        63,
+        25
+      ],
+      [
+        "4XL",
+        78,
+        66,
+        26
+      ],
+      [
+        "5XL",
+        80,
+        69,
+        27
+      ],
+      [
+        "6XL",
+        82,
+        72,
+        28
+      ]
+    ],
+    "garment_color": "black"
+  },
+  "gallery_revision": "regular-fit-men-closer-drape-women-v31",
+  "hero_templates": {
+    "white": "assets/hero/white-v1.png",
+    "black": "assets/hero/black-v1.png"
+  },
+  "color_attribute_id": 14177449,
+  "description_product_facts": "Футболка из 100% хлопка. Прямой крой, короткие рукава, круглый вырез. Принт нанесён методом DTF-печати. Рекомендуется бережная стирка.",
+  "hero_calibration": "assets/hero/calibration.json"
+}
