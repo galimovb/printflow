@@ -69,7 +69,7 @@ class RedrawImages:
         reason = "seller poster instead of actual ink" if self.reject_prints else ""
         return {key: {"accepted": not self.reject_prints, "reason": reason} for key in prints}
 
-    async def live_photo(self, product, art, color, index, audience="unisex", pose=None):
+    async def live_photo(self, product, art, color, index, audience="unisex", pose=None, geometry=None):
         self.calls.append(("live", color, index, audience, pose is not None))
         return image()
 
@@ -240,7 +240,7 @@ class RedrawGeneratorTest(unittest.TestCase):
             generator = Generator({}, load_config())
             generator.edit = edit
             await generator.live_photo(b"shirt", image(), "white", 0, "female")
-            await generator.live_photo(b"shirt", image(), "white", 1, "female", pose=b"seller-pose")
+            await generator.live_photo(b"shirt", image(), "white", 1, "female", pose=image())
 
         asyncio.run(run())
         self.assertEqual(calls[0][0], ["main-product.png", "artwork.png"])
@@ -258,9 +258,12 @@ class RedrawGeneratorTest(unittest.TestCase):
                     self.assertNotIn(stale, prompt)
         self.assertIn("a young man", live_photo_prompt("white", 0, "male"))
         posed = live_photo_prompt("black", 3, pose=True)
-        self.assertIn("ignore its shirt and print", posed)
+        self.assertIn("says nothing about the shirt, the print", posed)
         self.assertNotIn("PRINT AND FIT VIEW", posed)
         self.assertIn("the face may be outside the crop", live_photo_prompt("black", 3))
+        sized = live_photo_prompt("white", 0, geometry={"body_cm": [54, 70], "width_cm": 30, "height_cm": 24, "top_cm": 8})
+        self.assertIn("30 cm wide (56% of the shirt front width", sized)
+        self.assertIn("Never shrink it to a pocket", sized)
 
     def test_gallery_analysis_normalizes_echoed_photo_reference(self):
         answer = {

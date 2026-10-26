@@ -143,14 +143,30 @@ PERSONS = {
 }
 
 
-def live_photo_prompt(color: str, index: int, audience: str = "unisex", pose: bool = False) -> str:
+def print_placement(geometry: dict | None) -> str:
+    """Exact print size in words: the model drifts from the reference image alone."""
+    if not geometry:
+        return "at the size and position from main-product.png"
+    body_width = geometry["body_cm"][0]
+    return (
+        f"centered on the chest, {geometry['width_cm']:.0f} cm wide ({geometry['width_cm'] / body_width:.0%} of "
+        f"the shirt front width between the side seams) and {geometry['height_cm']:.0f} cm tall, top edge "
+        f"{geometry['top_cm']} cm below the collar seam, exactly as in main-product.png. Never shrink it to a "
+        "pocket or chest logo, never stretch it across the torso, never move it off-center"
+    )
+
+
+def live_photo_prompt(
+    color: str, index: int, audience: str = "unisex", pose: bool = False, geometry: dict | None = None
+) -> str:
     """Model photo from the calibrated shirt reference and the clean print file.
 
-    pose: a seller photo is attached only as a pose and framing reference.
+    pose: a blurred seller photo is attached only as a pose and framing reference.
+    geometry: print size from the straight reference, repeated in words.
     """
     pose_note = (
-        "pose-reference.png is another product photo used ONLY for pose and framing; ignore its shirt "
-        "and print completely. "
+        "pose-reference.png is a deliberately blurred photo used ONLY for body pose and camera framing; "
+        "it says nothing about the shirt, the print or its position. "
         if pose
         else ""
     )
@@ -160,7 +176,7 @@ def live_photo_prompt(color: str, index: int, audience: str = "unisex", pose: bo
         "artwork.png is the exact print. "
         + pose_note
         + f"SHIRT: solid {color.upper()} regular-fit cotton crewneck, short sleeves, not oversized. "
-        "PRINT: place artwork.png on the chest exactly once, at the size and position from main-product.png. "
+        f"PRINT: place artwork.png exactly once, {print_placement(geometry)}. "
         "Keep every element, letter, proportion and ink color unchanged; do not redraw, enlarge, crop "
         "or duplicate it. The ink follows fabric folds with matte cotton texture, not a glossy sticker. "
         f"PERSON: {PERSONS.get(audience, PERSONS['unisex'])}. Jeans or trousers, shirt untucked. "

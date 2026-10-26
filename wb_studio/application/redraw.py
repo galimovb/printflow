@@ -150,7 +150,7 @@ class RedrawPipeline:
         own = analysis.get("filter", {}).get("original_selected", [])[:MODEL_FRAMES]
         poses = [await self.files.source_photo(i) for i in own]
         arts = {color: await self.files.get("prints", f"prints/{color}.png") for color in colors}
-        products = {color: prepare_straight_reference(arts[color], color, self.config)[0] for color in colors}
+        references = {color: prepare_straight_reference(arts[color], color, self.config) for color in colors}
 
         async def frame(color: str, index: int) -> None:
             if self.files.has_frame(color, index):
@@ -159,9 +159,10 @@ class RedrawPipeline:
                 await self.files.store_frame(color, index, info_slide(index, color, self.config))
                 return
             pose = poses[index] if index < len(poses) else None
+            product, geometry = references[color]
             async with self.studio.photo_slots:
                 raw = await self.studio.with_photo_timeout(
-                    self.generator.live_photo(products[color], arts[color], color, index, audience, pose)
+                    self.generator.live_photo(product, arts[color], color, index, audience, pose, geometry)
                 )
             await self.files.store_frame(color, index, raw)
 

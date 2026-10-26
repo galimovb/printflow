@@ -6,7 +6,7 @@ import json
 import re
 
 from openai import AsyncOpenAI
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from printflow.domain.errors import PermanentError
 from printflow.services.printing.chromakey import finalize_print
@@ -67,6 +67,13 @@ def on_chromakey(raw: bytes) -> bytes:
     keyed = Image.new("RGBA", image.size, "#90EE90")
     keyed.alpha_composite(image)
     return png(keyed.convert("RGB"))
+
+
+def blurred(raw: bytes) -> bytes:
+    """Pose stays readable, the seller's print and its placement do not."""
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    image.thumbnail((900, 1200))
+    return png(image.filter(ImageFilter.GaussianBlur(max(6, image.width // 60))))
 
 
 def photo_index(value) -> int | None:
@@ -193,12 +200,19 @@ class Generator:
         return {key: data[key] for key in keys}
 
     async def live_photo(
-        self, product: bytes, art: bytes, color: str, index: int, audience: str = "unisex", pose: bytes | None = None
+        self,
+        product: bytes,
+        art: bytes,
+        color: str,
+        index: int,
+        audience: str = "unisex",
+        pose: bytes | None = None,
+        geometry: dict | None = None,
     ) -> bytes:
         files = [("main-product.png", product, "image/png"), ("artwork.png", art, "image/png")]
         if pose:
-            files.append(("pose-reference.png", pose, "image/png"))
-        return await self.edit(files, prompts.live_photo_prompt(color, index, audience, bool(pose)))
+            files.append(("pose-reference.png", blurred(pose), "image/png"))
+        return await self.edit(files, prompts.live_photo_prompt(color, index, audience, bool(pose), geometry))
 
     # --- standard -------------------------------------------------------------
 
