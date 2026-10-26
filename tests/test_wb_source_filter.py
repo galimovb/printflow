@@ -31,3 +31,13 @@ class SourceFilterTest(unittest.TestCase):
   for value in (.9,None,0,1.5):
    d=self.data();d['print_width']=value;self.assertFalse(assess(d,4)['accepted'])
   d=self.data();d['print_width']=.7;self.assertTrue(assess(d,4,.8)['accepted']);self.assertFalse(assess(d,4,.6)['accepted'])
+
+
+class VendorCodeTest(unittest.TestCase):
+    def test_design_group_color_and_disjoint_from_main_articles(self):
+        from printflow.wb_studio.domain.models import group_number, vendor_codes
+        codes = vendor_codes(123, ["white", "black"], group_number("PFWG-abc-7"))
+        self.assertEqual(codes, {"white": "TEE-000123-007-W", "black": "TEE-000123-007-B"})
+        self.assertEqual(group_number(None), 1)
+        # Main ozon-tee articles carry 9 digits after TEE-, studio codes 6.
+        self.assertNotRegex(codes["white"], r"^TEE-\d{9}")

@@ -123,7 +123,7 @@ class StandardPipelineTest(unittest.TestCase):
                 photos = [call for call in generator.calls if isinstance(call, tuple) and call[0] != "adapt"]
                 self.assertEqual(sorted(photos), [("white", 1, False), ("white", 2, False), ("white", 3, False)])
                 self.assertEqual(len(result["images"]["white"]), 6)
-                self.assertTrue(result["vendor_codes"]["white"].startswith("TEE-WB-"))
+                self.assertRegex(result["vendor_codes"]["white"], r"^TEE-d{6}-d{3}-W$")
                 self.assertTrue(all("printflow-wb/" in url for url in result["images"]["white"]))
                 self.assertNotIn("wb", result)  # publication never happens during generation
 
@@ -354,7 +354,7 @@ class PublicationTest(unittest.TestCase):
                 "config": config,
                 "text": {"title": "Футболка", "description": "Принт"},
                 "images": {"white": ["https://s3/1.jpg", "https://s3/2.jpg"]},
-                "vendor_codes": {"white": "TEE-WB-000001-W"},
+                "vendor_codes": {"white": "TEE-000001-001-W"},
             }
             calls = []
             created = False
@@ -363,7 +363,7 @@ class PublicationTest(unittest.TestCase):
                 nonlocal created
                 calls.append((path, copy.deepcopy(body)))
                 if path.endswith("/list"):
-                    return {"cards": [{"vendorCode": "TEE-WB-000001-W", "nmID": 123, "imtID": 12}] if created else []}
+                    return {"cards": [{"vendorCode": "TEE-000001-001-W", "nmID": 123, "imtID": 12}] if created else []}
                 if path.endswith("/barcodes"):
                     return {"data": ["barcode"]}
                 if path.endswith("/upload"):

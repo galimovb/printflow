@@ -16,7 +16,7 @@ def draft(number):
     config=load_config();config.update(price=1200,sizes=[{'techSize':'S','wbSize':'46'},{'techSize':'L','wbSize':'50'}])
     return {'config':config,'text':{'title':f'Футболка {number}','description':f'Рисунок {number}'},
         'images':{c:[f'https://s3/{number}/{c}/{i}.jpg' for i in range(6)] for c in ('white','black')},
-        'vendor_codes':{c:f'TEE-WB-{number:06}-'+('W' if c=='white' else 'B') for c in ('white','black')},'review_required':True}
+        'vendor_codes':{c:f'TEE-{number:06}-001-'+('W' if c=='white' else 'B') for c in ('white','black')},'review_required':True}
 
 
 class WbQueueTest(unittest.TestCase):
@@ -30,7 +30,7 @@ class WbQueueTest(unittest.TestCase):
                 job,_=repo.create({'kind':'wb_card','theme':'test','source':{'image':'https://source'},'config':config},product='tee_wb',numbered=True)
                 result=await studio.card(job,lambda *_:None)
                 self.assertEqual(result['storage_buckets'],{'prints':'tee-prints','mockups':'tee-mockups','temporary':'tee-temporary-storage'})
-                self.assertEqual([key for key in storage.objects if key.startswith('tee-prints/')],[f'tee-prints/printflow-wb/{job.id}/print.png',f'tee-prints/printflow-wb/{job.id}/prints/white.png',f'tee-prints/TEE-WB-{job.design_number:06d}-W.png'])
+                self.assertEqual([key for key in storage.objects if key.startswith('tee-prints/')],[f'tee-prints/printflow-wb/{job.id}/print.png',f'tee-prints/printflow-wb/{job.id}/prints/white.png',f'tee-prints/TEE-{job.design_number:06d}-001-W.png'])
                 self.assertTrue(result['images']['white'][0].startswith('https://s3/tee-mockups/'))
                 self.assertFalse(any(key.startswith('tee-temporary-storage/') for key in storage.objects))
                 self.assertTrue(result['temporary_removed'])
