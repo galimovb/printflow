@@ -137,7 +137,7 @@ if __name__=='__main__':
     p.add_argument('--out',default='outputs/wb-mass-v12-cats20-20261025')
     p.add_argument('--overshoot',type=float,default=2,help='queue this many sources per missing design')
     p.add_argument('--search-step',type=int,default=30,help='how many more WB results each additional search requests')
-    p.add_argument('--max-search',type=int,default=300,help='stop searching the theme beyond this many results')
+    p.add_argument('--max-search',type=int,default=60,help='stop searching the theme beyond this many results')
     p.add_argument('--sources-from',help='replay sources and galleries of a previous run folder, no search')
     p.add_argument('--fresh',action='store_true',help='fresh search and galleries; do not import previous trial captures')
     asyncio.run(main(p.parse_args()))
