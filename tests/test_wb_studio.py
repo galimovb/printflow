@@ -123,7 +123,7 @@ class StandardPipelineTest(unittest.TestCase):
                 photos = [call for call in generator.calls if isinstance(call, tuple) and call[0] != "adapt"]
                 self.assertEqual(sorted(photos), [("white", 1, False), ("white", 2, False), ("white", 3, False)])
                 self.assertEqual(len(result["images"]["white"]), 6)
-                self.assertRegex(result["vendor_codes"]["white"], r"^TEE-d{6}-d{3}-W$")
+                self.assertRegex(result["vendor_codes"]["white"], r"^TEE-\d{6}-\d{3}-W$")
                 self.assertTrue(all("printflow-wb/" in url for url in result["images"]["white"]))
                 self.assertNotIn("wb", result)  # publication never happens during generation
 
