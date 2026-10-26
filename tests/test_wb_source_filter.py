@@ -1,7 +1,7 @@
 import copy,unittest
 from printflow.wb_studio.domain.source_filter import assess
 class SourceFilterTest(unittest.TestCase):
- def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'main_print_side':'front','print_width':.55,'print_source':0,'selected':[0,1,2,3],
+ def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'main_print_side':'front','print_width':.55,'reaches_edges':False,'print_source':0,'selected':[0,1,2,3],
   'photos':[{'index':i,'role':'front','same_print':True,'normal_light':True,'adult':True} for i in range(4)]}
  def test_accepts_four_matching_fronts(self):self.assertTrue(assess(self.data(),4)['accepted'])
  def test_rejects_wrong_or_unknown_theme(self):
@@ -41,3 +41,17 @@ class VendorCodeTest(unittest.TestCase):
         self.assertEqual(group_number(None), 1)
         # Main ozon-tee articles carry 9 digits after TEE-, studio codes 6.
         self.assertNotRegex(codes["white"], r"^TEE-\d{9}")
+
+
+class EdgeAndWidthTest(unittest.TestCase):
+    def data(self):
+        return SourceFilterTest.data(None)
+
+    def test_limit_itself_rejects_and_edges_reject(self):
+        d = self.data()
+        d["print_width"] = 0.7
+        self.assertFalse(assess(d, 4, 0.7)["accepted"])
+        for value in (True, None):
+            d = self.data()
+            d["reaches_edges"] = value
+            self.assertFalse(assess(d, 4)["accepted"])

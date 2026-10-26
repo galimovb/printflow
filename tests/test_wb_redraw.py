@@ -208,7 +208,7 @@ class RedrawPipelineTest(unittest.TestCase):
             redraw, _ = studio.campaign(["гонки"], 20, design_limit=20, algorithm="source_redraw")[0]
             self.assertNotEqual(standard.id, redraw.id)
             self.assertEqual(standard.payload["config"]["algorithm"], "standard")
-            self.assertEqual(redraw.payload["config"]["max_print_width"], 0.8)
+            self.assertEqual(redraw.payload["config"]["max_print_width"], 0.7)
             self.assertNotIn("max_print_width", standard.payload["config"])
             with self.assertRaises(ValueError):
                 studio.configuration(algorithm="unknown")
@@ -275,6 +275,7 @@ class RedrawGeneratorTest(unittest.TestCase):
             "single_print": True,
             "print_count": 1,
             "print_width": 0.5,
+            "reaches_edges": False,
             "audience": "female",
             "title": "Футболка с принтом кот",
             "description": "Кот",

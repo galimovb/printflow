@@ -24,9 +24,13 @@ GALLERY_ANALYSIS = (
     '"{theme}"? Judge the drawing, not the listing title.\n'
     "- main_print_side: front|back|both|unknown. A tiny neck or back logo does not count.\n"
     "- print_count (int), single_print (bool), print_reason (Russian): separate prints on the garment. "
-    "An illustration with its own caption is 1; a small chest logo plus a large design is 2.\n"
-    "- print_width: width of the main print as a share of the shirt front width between the side "
-    "seams, 0..1.\n"
+    "A caption counts as part of an illustration only when it touches it inside one compact block. "
+    "Elements in different zones of the shirt separated by plain fabric are separate prints: chest text "
+    "plus a design near the hem is 2; a small chest logo plus a large design is 2.\n"
+    "- print_width: width of the widest print as a share of the shirt front width between the side "
+    "seams, 0..1. Measure the real extent, do not round down.\n"
+    "- reaches_edges (bool): any print touches or crosses a side seam, a sleeve, the collar or the "
+    "bottom hem.\n"
     "- audience: female|male|unisex. female if the shirt is a women's cut or shown only on women; "
     "male if a men's cut or shown only on men; otherwise unisex.\n"
     '- title: Russian, starts with "Футболка с принтом", max 60 characters, names the print.\n'

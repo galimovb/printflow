@@ -158,7 +158,7 @@ class Generator:
         if not isinstance(data.get("title"), str) or not isinstance(data.get("description"), str):
             raise RuntimeError("Invalid combined listing text")
         data["print_source"] = photo_index(data.get("print_source"))
-        assessment = assess(data, len(photos), self.config.get("max_print_width", 0.8))
+        assessment = assess(data, len(photos), self.config.get("max_print_width", 0.7))
         audience = data.get("audience") if data.get("audience") in ("female", "male") else "unisex"
         return {
             "selected": assessment["selected"],

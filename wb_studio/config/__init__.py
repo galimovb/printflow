@@ -14,7 +14,7 @@ SOURCE_REDRAW = {
     "gallery_revision": "source-redraw-v13",
     "vision_model": "gpt-4.1",
     # Prints wider than this share of the shirt front are rejected by the gallery filter.
-    "max_print_width": 0.8,
+    "max_print_width": 0.7,
 }
 
 

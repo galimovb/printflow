@@ -1,13 +1,15 @@
 """Filter sources; plan missing new views without replacing a source product."""
 
 
-def assess(data, count, max_print_width=0.8):
+def assess(data, count, max_print_width=0.7):
     reasons = []
     width = data.get("print_width")
     if type(width) not in (int, float) or not 0 < width <= 1:
         reasons.append("Не определена ширина принта")
-    elif width > max_print_width:
+    elif width >= max_print_width:  # the model tends to round down, so the limit itself rejects
         reasons.append("Принт раздут почти на всю ширину футболки")
+    if data.get("reaches_edges") is not False:
+        reasons.append("Принт доходит до швов, рукава, ворота или низа футболки")
     if data.get("theme_match") is not True:
         reasons.append("Принт не соответствует теме или соответствие не подтверждено")
     if data.get("main_print_side") != "front":
