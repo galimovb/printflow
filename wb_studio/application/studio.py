@@ -35,6 +35,7 @@ LIVE_PUBLISH_KEYS = (
     "sizes",
     "brand",
     "color_attribute_id",
+    "gender_attribute_id",
     "kiz_marked",
 )
 

@@ -207,3 +207,21 @@ class WbQueueTest(unittest.TestCase):
         with self.assertRaises(ValueError):merge_designs({'PRINTFLOW_WB_MERGE_DESIGNS':'16'})
         with self.assertRaises(PermanentError):build_group_payload([draft(i) for i in range(16)],[])
         with self.assertRaises(PermanentError):build_group_payload([draft(1),draft(1)],['x']*8)
+
+
+class WbGenderTest(unittest.TestCase):
+    def test_gender_follows_audience_and_unisex_stays_empty(self):
+        from printflow.wb_studio.infrastructure.wb.publisher import build_payload
+        def gender(audience):
+            card=draft(1);card['analysis']={'audience':audience};card['config']['gender_attribute_id']=204557
+            variant=build_payload(card,[f'b{i}' for i in range(4)])[0]['variants'][0]
+            return [c['value'] for c in variant['characteristics'] if c['id']==card['config']['gender_attribute_id']]
+        self.assertEqual(gender('female'),[['Женский']])
+        self.assertEqual(gender('male'),[['Мужской']])
+        self.assertEqual(gender('unisex'),[])
+
+    def test_gender_is_not_sent_without_configured_attribute(self):
+        from printflow.wb_studio.infrastructure.wb.publisher import build_payload
+        card=draft(1);card['analysis']={'audience':'female'}
+        names=[c['value'] for c in build_payload(card,[f'b{i}' for i in range(4)])[0]['variants'][0]['characteristics']]
+        self.assertNotIn(['Женский'],names)

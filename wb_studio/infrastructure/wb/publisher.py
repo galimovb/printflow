@@ -6,6 +6,7 @@ import copy
 import httpx
 
 from printflow.domain.errors import PermanentError, RetryLater
+from printflow.wb_studio.domain.models import WB_GENDER
 
 
 def validate(config):
@@ -44,6 +45,10 @@ def build_payload(draft, barcodes):
             characteristics.append(
                 {"id": config["color_attribute_id"], "value": ["белый" if color == "white" else "черный"]}
             )
+        gender = WB_GENDER.get((draft.get("analysis") or {}).get("audience"))
+        if config.get("gender_attribute_id") and gender:
+            characteristics = [x for x in characteristics if int(x["id"]) != int(config["gender_attribute_id"])]
+            characteristics.append({"id": config["gender_attribute_id"], "value": [gender]})
         variants.append(
             {
                 "vendorCode": draft["vendor_codes"][color],

@@ -6,6 +6,9 @@ ALGORITHMS = ("standard", "source_redraw")
 COLORS = ("white", "black")
 
 
+# WB "Пол" accepts one value; unisex shirts leave it empty so the card is shown to everyone.
+WB_GENDER = {"female": "Женский", "male": "Мужской"}
+
 # Main ozon-tee articles are TEE-<9 digits>-...; a 6-digit design number keeps studio codes disjoint.
 VENDOR_PREFIX = "TEE"
 
