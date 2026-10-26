@@ -1,7 +1,16 @@
 """Filter sources; plan missing new views without replacing a source product."""
 
 
-def assess(data, count, max_print_width=0.7):
+def photo_shows_print(photo: dict) -> bool:
+    """The main front design is visible in normal light, whoever or whatever wears it."""
+    return (
+        photo.get("same_print") is True
+        and photo.get("normal_light") is True
+        and photo.get("role") in ("front", "detail", "other")
+    )
+
+
+def assess(data, count, max_print_width=0.9):
     reasons = []
     width = data.get("print_width")
     if type(width) not in (int, float) or not 0 < width <= 1:
@@ -49,16 +58,20 @@ def assess(data, count, max_print_width=0.7):
         if type(index) is int and index in eligible and index not in selected:
             selected.append(index)
     selected = (selected + [i for i in eligible if i not in selected])[:4]
+    # Eligible photos only supply poses; frames without one use the fixed scenes.
     original_selected = selected.copy()
-    if not selected:
-        reasons.append("Нет подходящих передних фото для генерации")
+    # The print may come from any photo that shows it whole: a child model, a flat lay, a close-up.
+    showing = [i for i in range(count) if photo_shows_print(indexed.get(i, {}))]
     source = data.get("print_source")
-    # A rejected suggestion falls back to the best eligible photo instead of dropping the product.
     if type(source) is not int or source not in eligible:
-        source = selected[0] if selected else None
-    extra = list(range(len(selected), 4)) if selected else []
-    if selected:
-        selected.extend([source] * (4 - len(selected)))
+        if selected:
+            source = selected[0]
+        elif source not in showing:
+            source = showing[0] if showing else None
+    if source is None:
+        reasons.append("Принт целиком не виден ни на одном фото")
+    extra = list(range(len(selected), 4))
+    selected.extend([source] * (4 - len(selected)))
     return {
         "accepted": not reasons,
         "reasons": reasons,

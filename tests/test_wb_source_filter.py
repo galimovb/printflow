@@ -55,3 +55,22 @@ class EdgeAndWidthTest(unittest.TestCase):
             d = self.data()
             d["reaches_edges"] = value
             self.assertFalse(assess(d, 4)["accepted"])
+
+
+class PrintWithoutPoseTest(unittest.TestCase):
+    def test_print_from_any_photo_when_no_adult_front_photo(self):
+        d = SourceFilterTest.data(None)
+        for photo in d["photos"]:
+            photo["adult"] = False  # children wearing the shirt
+        d["photos"][3]["role"] = "infographic"
+        d["print_source"] = 2
+        result = assess(d, 4)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["print_source"], 2)
+        self.assertEqual(result["original_selected"], [])  # all frames use the fixed scenes
+
+    def test_rejects_only_when_the_print_is_never_visible(self):
+        d = SourceFilterTest.data(None)
+        for photo in d["photos"]:
+            photo["role"] = "infographic"
+        self.assertFalse(assess(d, 4)["accepted"])
