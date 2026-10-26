@@ -60,7 +60,7 @@ async def main(args):
     from printflow.wb_studio.application.studio import Studio
     downloader=Studio(SimpleNamespace(list=lambda **kw:[]),LocalStorage(out/'files'),env)
     async def fetch(url):
-        return cached[url].read_bytes() if url in cached else await downloader.fetch(url)
+        return cached[url].read_bytes() if url in cached else await downloader.fetch_photo(url)
     if args.sources_from:
         candidates=replay
     elif not args.fresh:
