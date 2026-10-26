@@ -12,11 +12,11 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 
 SOURCE_REDRAW = {
     "gallery_revision": "source-redraw-v13",
-    "vision_model": "gpt-4.1",
-    # The mini model merged separate chest and hem prints into one; the full model counts them.
-    "analysis_model": "gpt-4.1",
+    "vision_model": "gpt-6-astra",
+    # Counts chest-and-hem prints as two and a caption next to a drawing as one, consistently.
+    "analysis_model": "gpt-6-astra",
     # Prints wider than this share of the shirt front are rejected by the gallery filter.
-    "max_print_width": 0.7,
+    "max_print_width": 0.9,
 }
 
 

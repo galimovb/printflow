@@ -15,6 +15,8 @@ from printflow.wb_studio.domain.source_filter import assess
 
 from .errors import generation_errors
 
+REASONING_MODELS = ("gpt-5", "gpt-6", "o1", "o3", "o4")
+
 
 def data_url(raw: bytes, mime: str = "image/jpeg") -> str:
     return f"data:{mime};base64," + base64.b64encode(raw).decode()
@@ -113,11 +115,13 @@ class Generator:
         if not retries:
             client = client.with_options(max_retries=0)
         async with client:
+            # Reasoning models reject a fixed temperature; the rest answer deterministically with 0.
+            options = {} if model.startswith(REASONING_MODELS) else {"temperature": 0}
             response = await client.chat.completions.create(
                 model=model,
-                temperature=0,
                 response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": content}],
+                **options,
             )
         return json.loads(response.choices[0].message.content)
 
@@ -160,7 +164,7 @@ class Generator:
         if not isinstance(data.get("title"), str) or not isinstance(data.get("description"), str):
             raise RuntimeError("Invalid combined listing text")
         data["print_source"] = photo_index(data.get("print_source"))
-        assessment = assess(data, len(photos), self.config.get("max_print_width", 0.7))
+        assessment = assess(data, len(photos), self.config.get("max_print_width", 0.9))
         audience = data.get("audience") if data.get("audience") in ("female", "male") else "unisex"
         return {
             "selected": assessment["selected"],
