@@ -146,7 +146,9 @@ class Generator:
                 {"type": "text", "text": f"PHOTO INDEX {index}"},
                 {"type": "image_url", "image_url": {"url": data_url(numbered_photo(raw, index))}},
             ]
-        data = await self.chat_json(content, model=self.config["name_model"], retries=False)
+        data = await self.chat_json(
+            content, model=self.config.get("analysis_model", self.config["name_model"]), retries=False
+        )
         roles = data.get("photos")
         if not isinstance(roles, list):
             raise RuntimeError("Missing gallery photo classifications")

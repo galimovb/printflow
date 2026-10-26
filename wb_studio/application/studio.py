@@ -225,7 +225,9 @@ class Studio:
             raise
         await self.remove_temporary(files)
         result.update(
-            vendor_codes=vendor_codes(job.design_number, config["colors"], group_number(job.payload.get("merge_group"))),
+            vendor_codes=vendor_codes(
+                job.design_number, config["colors"], group_number(job.payload.get("merge_group"))
+            ),
             source_url=job.payload["source"].get("url", ""),
             algorithm=config["algorithm"],
             config=config,
@@ -250,7 +252,9 @@ class Studio:
 
     async def save_article_prints(self, job, result: dict, files: CardFiles) -> dict:
         """Printable PNGs named by WB vendor code; job files stay resumable."""
-        codes = vendor_codes(job.design_number, job.payload["config"]["colors"], group_number(job.payload.get("merge_group")))
+        codes = vendor_codes(
+            job.design_number, job.payload["config"]["colors"], group_number(job.payload.get("merge_group"))
+        )
         result["vendor_codes"] = codes
         canonical = result.setdefault("article_prints", {})
         for color, code in codes.items():
