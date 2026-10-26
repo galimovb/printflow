@@ -29,13 +29,14 @@ class WbQueueTest(unittest.TestCase):
                 config=studio.configuration(['white']);config['photos_per_color']=2
                 job,_=repo.create({'kind':'wb_card','theme':'test','source':{'image':'https://source'},'config':config},product='tee_wb',numbered=True)
                 result=await studio.card(job,lambda *_:None)
-                self.assertEqual(result['storage_buckets'],{'prints':'tee-prints','mockups':'tee-mockups'})
+                self.assertEqual(result['storage_buckets'],{'prints':'tee-prints','mockups':'tee-mockups','temporary':'tee-temporary-storage'})
                 self.assertEqual([key for key in storage.objects if key.startswith('tee-prints/')],[f'tee-prints/printflow-wb/{job.id}/print.png',f'tee-prints/printflow-wb/{job.id}/prints/white.png',f'tee-prints/PFW-{job.design_number:06d}-W.png'])
                 self.assertTrue(result['images']['white'][0].startswith('https://s3/tee-mockups/'))
-                self.assertTrue(result['source'].startswith('https://s3/tee-mockups/'))
+                self.assertFalse(any(key.startswith('tee-temporary-storage/') for key in storage.objects))
+                self.assertTrue(result['temporary_removed'])
                 changed=Studio(repo,storage,{'PRINTFLOW_WB_PRINTS_BUCKET':'different','PRINTFLOW_WB_MOCKUPS_BUCKET':'different'})
-                self.assertEqual(changed.storage_buckets(result),{'prints':'tee-prints','mockups':'tee-mockups'})
-                self.assertEqual(studio.storage_buckets({'print':'https://old-print'}),{'prints':'tee-prints','mockups':'tee-prints'})
+                self.assertEqual(changed.storage_buckets(result),{'prints':'tee-prints','mockups':'tee-mockups','temporary':'tee-temporary-storage'})
+                self.assertEqual(studio.storage_buckets({'print':'https://old-print'}),{'prints':'tee-prints','mockups':'tee-prints','temporary':'tee-temporary-storage'})
         asyncio.run(run())
 
     def test_discovery_barrier_precedes_generation_even_during_retry_wait(self):

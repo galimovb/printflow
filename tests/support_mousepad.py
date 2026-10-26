@@ -66,6 +66,11 @@ class FakeStorage:
     async def exists(self, bucket: str, key: str) -> bool:
         return f"{bucket}/{key}" in self.objects
 
+    async def delete(self, bucket: str, keys: list[str]) -> int:
+        for key in keys:
+            self.objects.pop(f"{bucket}/{key}", None)
+        return len(keys)
+
 
 class FakeGenerator:
     def __init__(self) -> None:

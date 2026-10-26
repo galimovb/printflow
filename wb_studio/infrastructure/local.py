@@ -43,6 +43,11 @@ class LocalStorage:
         path.write_bytes(data)
         return path.as_uri()
 
+    async def delete(self, bucket, keys):
+        for key in keys:
+            self.path(bucket, key).unlink(missing_ok=True)
+        return len(keys)
+
 
 async def generate(body, output, env, *, generator=None, search=None, fetch=None):
     output = Path(output).resolve()

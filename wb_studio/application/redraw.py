@@ -54,7 +54,7 @@ class RedrawPipeline:
             if str(index) in archived:
                 return
             raw = to_png(await self.studio.fetch_photo(url))
-            archived[str(index)] = await self.files.put("mockups", f"sources/{index + 1:02}.png", raw)
+            archived[str(index)] = await self.files.put("temporary", f"sources/{index + 1:02}.png", raw)
             self.files.save(f"source_saved:{index + 1}", self.result)
 
         await gather_all(download(i, url) for i, url in enumerate(urls))
@@ -86,10 +86,10 @@ class RedrawPipeline:
         attempts = result.setdefault("print_attempts", {})
 
         async def put_candidate(key: str, raw: bytes) -> None:
-            candidates[key] = await self.files.put("prints", f"candidates/{key}.png", raw)
+            candidates[key] = await self.files.put("temporary", f"candidates/{key}.png", raw)
 
         async def candidate(key: str) -> bytes:
-            return await self.files.get("prints", f"candidates/{key}.png")
+            return await self.files.get("temporary", f"candidates/{key}.png")
 
         while not all(color in variants for color in colors):
             for key, check in checks.items():

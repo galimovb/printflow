@@ -61,6 +61,9 @@ class Studio:
         self.legacy_bucket = env.get("PRINTFLOW_WB_BUCKET", "tee-prints")
         self.prints_bucket = env.get("PRINTFLOW_WB_PRINTS_BUCKET", "tee-prints")
         self.mockups_bucket = env.get("PRINTFLOW_WB_MOCKUPS_BUCKET", "tee-mockups")
+        self.temporary_bucket = env.get("PRINTFLOW_WB_TEMPORARY_BUCKET", "tee-temporary-storage")
+        # Local review runs keep seller photos next to the results for side-by-side comparison.
+        self.keep_temporary = env.get("PRINTFLOW_WB_KEEP_TEMPORARY", "").lower() in ("1", "true", "yes")
 
     # --- configuration and job creation -----------------------------------------
 
@@ -200,17 +203,27 @@ class Studio:
                 if legacy
                 else {"prints": self.prints_bucket, "mockups": self.mockups_bucket}
             )
+        # Jobs created before the temporary bucket get it on their next run.
+        result["storage_buckets"].setdefault("temporary", self.temporary_bucket)
         return result["storage_buckets"]
 
     async def card(self, job, save):
         result = copy.deepcopy(job.result)
+        if result.get("review_required"):
+            return result  # finished: nothing to redo, and its working files are already gone
         result.pop("failure", None)
         config = job.payload["config"]
         generator = self.generator_override or Generator(self.env, config)
         if self.generator_override is None:
             check_information(config)
         files = CardFiles(self.storage, self.storage_buckets(result), job.id, result, save)
-        await PIPELINES[config["algorithm"]](self, job, generator, files).run()
+        try:
+            await PIPELINES[config["algorithm"]](self, job, generator, files).run()
+        except PermanentError:
+            # A rejected card will never resume; transient failures keep files for the retry.
+            await self.remove_temporary(files)
+            raise
+        await self.remove_temporary(files)
         result.update(
             vendor_codes=vendor_codes(job.design_number, config["colors"]),
             source_url=job.payload["source"].get("url", ""),
@@ -227,6 +240,13 @@ class Studio:
             }
         save("ready_for_review", result)
         return result
+
+    async def remove_temporary(self, files: CardFiles) -> None:
+        if self.keep_temporary or not files.result.get("temporary_files"):
+            return
+        await files.remove_temporary()
+        # Keep the current stage: a rejected card must still read as rejected.
+        files.persist(files.last_stage, files.result)
 
     async def save_article_prints(self, job, result: dict, files: CardFiles) -> dict:
         """Printable PNGs named by WB vendor code; job files stay resumable."""

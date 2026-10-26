@@ -37,10 +37,10 @@ class StandardPipeline:
     async def extract(self) -> bytes:
         if not self.result.get("source"):
             raw = to_png(await self.studio.fetch_photo(self.job.payload["source"]["image"]))
-            self.result["source"] = await self.files.put("mockups", "source.png", raw)
+            self.result["source"] = await self.files.put("temporary", "source.png", raw)
             self.files.save("source_saved", self.result)
         if not self.result.get("print"):
-            source = await self.files.get("mockups", "source.png")
+            source = await self.files.get("temporary", "source.png")
             art = await self.generator.extract(source, self.job.payload["theme"])
             self.result["print"] = await self.files.put("prints", "print.png", art)
             self.files.save("print_ready", self.result)
@@ -99,10 +99,10 @@ class StandardPipeline:
         for color, art in arts.items():
             name = f"templates/{color}/product-reference.png"
             if color in references:
-                products[color] = await self.files.get("mockups", name)
+                products[color] = await self.files.get("temporary", name)
                 continue
             data, geometry = await asyncio.to_thread(prepare_straight_reference, art, color, self.config)
-            geometry["url"] = await self.files.put("mockups", name, data)
+            geometry["url"] = await self.files.put("temporary", name, data)
             references[color] = geometry
             self.files.save(f"product_reference:{color}", self.result)
             products[color] = data
@@ -110,7 +110,7 @@ class StandardPipeline:
 
     async def hero(self, art: bytes, color: str) -> bytes:
         prepared, geometry = await asyncio.to_thread(prepare_hero, art, color, self.config)
-        geometry["preview"] = await self.files.put("mockups", f"{color}/01-placed.png", prepared)
+        geometry["preview"] = await self.files.put("temporary", f"{color}/01-placed.png", prepared)
         self.result.setdefault("hero_placement", {})[color] = geometry
         self.files.save(f"hero_placed:{color}", self.result)
         return prepared

@@ -74,6 +74,10 @@ class RedrawImages:
         return image()
 
 
+def temporary_keys(studio):
+    return [key for key in studio.storage.objects if key.startswith("tee-temporary-storage/")]
+
+
 async def queued_card(tmp, sources):
     repo = new_repository(tmp)
 
@@ -116,6 +120,10 @@ class RedrawPipelineTest(unittest.TestCase):
                 self.assertEqual(len(result["source_photos"]), 6)
                 self.assertEqual(set(result["print_variants"]), {"white", "black"})
                 self.assertTrue(result["review_required"])
+                # Seller photos and print candidates are deleted once the card is ready.
+                self.assertTrue(result["temporary_removed"])
+                self.assertFalse(temporary_keys(studio))
+                self.assertTrue(any(key.startswith("tee-mockups/") for key in studio.storage.objects))
 
         asyncio.run(run())
 
@@ -133,6 +141,22 @@ class RedrawPipelineTest(unittest.TestCase):
                 self.assertFalse(saved.get("print_variants"))
                 self.assertNotIn("images", saved)
                 self.assertFalse(any(call[0] == "live" for call in generator.calls))
+                self.assertFalse(temporary_keys(studio))  # rejected cards never resume
+
+        asyncio.run(run())
+
+    def test_transient_failure_keeps_working_files_for_the_retry(self):
+        class Unavailable(RedrawImages):
+            async def live_photo(self, *args, **kwargs):
+                raise RuntimeError("network")
+
+        async def run():
+            with TempDir() as tmp:
+                studio, repo, job, save = await queued_card(tmp, [listing(3)])
+                with patch(GENERATOR, return_value=Unavailable()), self.assertRaises(RuntimeError):
+                    await studio.card(job, save)
+                self.assertEqual(len([key for key in temporary_keys(studio) if "/sources/" in key]), 3)
+                self.assertFalse(repo.get(job.id).result.get("temporary_removed"))
 
         asyncio.run(run())
 

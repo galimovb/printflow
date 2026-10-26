@@ -18,7 +18,7 @@ from printflow.wb_studio.infrastructure.wb.search import parsing_batch
 @parsing_batch
 async def main(args):
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
-    env=read_env();logfile=out/'requests.json';calls=read(logfile) if logfile.exists() else []
+    env={**read_env(),'PRINTFLOW_WB_KEEP_TEMPORARY':'1'};logfile=out/'requests.json';calls=read(logfile) if logfile.exists() else []
     def log(kind,state,**details):
         calls.append({'kind':kind,'state':state,'time':time.time(),**details});write(logfile,calls)
     class Metered(Generator):
