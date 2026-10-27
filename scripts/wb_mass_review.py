@@ -111,14 +111,14 @@ async def main(args):
     while True:
         current=entries();done=sum(e['status']=='done' for e in current)
         if done>=args.count:break
-        # Overprovision for filter rejections: one round instead of several one-by-one rounds.
+        # Exactly the missing number; the next portion starts only after this one has finished.
         size=max(1,round((args.count-done)*args.overshoot))
         await take(size)
-        batch=ready[:];ready.clear()
+        batch=ready[:size];del ready[:size]
         if not batch:break
         print('MASS QUEUE',len(batch),'sources; already accepted',done,'target',args.count,flush=True)
         write(out/f'sources-{int(time.time())}.json',batch)
-        # The next galleries are parsed in the browser while this batch generates.
+        # Only browser parsing overlaps with generation; parsed spares wait for the next portion.
         running=asyncio.create_task(generate({'theme':args.theme,'sources':batch,'algorithm':'source_redraw',
                                               'colors':['white','black']},out,env,fetch=fetch))
         await asyncio.gather(running,take(size))
@@ -135,7 +135,7 @@ if __name__=='__main__':
     p.add_argument('--count',type=int,default=20)
     p.add_argument('--theme',required=True)
     p.add_argument('--out',default='outputs/wb-mass-v12-cats20-20261025')
-    p.add_argument('--overshoot',type=float,default=2,help='queue this many sources per missing design')
+    p.add_argument('--overshoot',type=float,default=1,help='queue this many sources per missing design')
     p.add_argument('--search-step',type=int,default=30,help='how many more WB results each additional search requests')
     p.add_argument('--max-search',type=int,default=60,help='stop searching the theme beyond this many results')
     p.add_argument('--sources-from',help='replay sources and galleries of a previous run folder, no search')
