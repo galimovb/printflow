@@ -107,6 +107,12 @@ class JobRepository:
         with self._conn() as db:
             return {row[0]: row[1] for row in db.execute(sql, (product,) if product else ())}
 
+    def all(self, product: str) -> list[Job]:
+        """Every job of a product, oldest first: background decisions must see old jobs too (list() is capped)."""
+        with self._conn() as db:
+            rows = db.execute("SELECT * FROM jobs WHERE product = ? ORDER BY number", (product,)).fetchall()
+            return [self._to_job(r) for r in rows]  # type: ignore[misc]
+
     def wb_group_cards(self, key: str) -> list[Job]:
         """Exact persistent members of one WB group; no listing/pagination truncation."""
         with self._conn() as db:
@@ -241,11 +247,13 @@ class JobRepository:
                 + " AND (json_extract(payload, '$.theme_key') IS NULL OR NOT EXISTS ("
                 "SELECT 1 FROM jobs AS busy WHERE busy.status = 'running' AND busy.product = jobs.product"
                 " AND json_extract(busy.payload, '$.theme_key') = json_extract(jobs.payload, '$.theme_key')))"
-                + " AND (product != 'tee_wb' OR json_extract(payload, '$.kind') = 'wb_discover' OR NOT EXISTS ("
+                + " AND (product != 'tee_wb' OR json_extract(payload, '$.kind') IN ('wb_discover', 'wb_publish')"
+                " OR NOT EXISTS ("
                 "SELECT 1 FROM jobs AS discovery WHERE discovery.product = 'tee_wb'"
                 " AND json_extract(discovery.payload, '$.kind') = 'wb_discover'"
                 " AND discovery.status IN ('pending', 'running')))"
-                + " ORDER BY ifnull(json_extract(payload, '$.kind'), 'card') = 'card', number LIMIT 1",
+                # Card generation goes last: a publication or a short job never waits behind hundreds of cards.
+                + " ORDER BY ifnull(json_extract(payload, '$.kind'), 'card') IN ('card', 'wb_card'), number LIMIT 1",
                 (now, product) if product else (now,),
             ).fetchone()
             if row is None:

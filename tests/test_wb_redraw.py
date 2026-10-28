@@ -36,14 +36,15 @@ def listing(count=1, complete=True, sku="123"):
 class RedrawImages:
     """Fake generator: accepts everything unless told otherwise and records every paid call."""
 
-    def __init__(self, selected=(0,), audience="male", accepted=True):
+    def __init__(self, selected=(0,), audience="male", accepted=True, shirt_color=None):
         self.calls = []
+        self.shirt_color = shirt_color
         self.selected = list(selected)
         self.audience = audience
         self.accepted = accepted
         self.reject_prints = False
 
-    async def analyze_gallery(self, photos, theme):
+    async def analyze_gallery(self, photos, theme, source_title=""):
         self.calls.append("analysis")
         frames = self.selected + [self.selected[0]] * (4 - len(self.selected))
         return {
@@ -53,6 +54,7 @@ class RedrawImages:
             "filter": {"accepted": self.accepted, "reasons": [] if self.accepted else ["Не та тема"],
                        "original_selected": self.selected},
             "audience": self.audience,
+            "shirt_color": self.shirt_color,
             "text": {"title": "Футболка с принтом кот", "description": "Кот"},
         }  # fmt: skip
 
@@ -124,6 +126,24 @@ class RedrawPipelineTest(unittest.TestCase):
                 self.assertTrue(result["temporary_removed"])
                 self.assertFalse(temporary_keys(studio))
                 self.assertTrue(any(key.startswith("tee-mockups/") for key in studio.storage.objects))
+
+        asyncio.run(run())
+
+    def test_only_the_seller_shirt_color_is_generated(self):
+        async def run():
+            with TempDir() as tmp:
+                studio, repo, job, save = await queued_card(tmp, [listing(6)])
+                generator = RedrawImages(selected=(0, 2), shirt_color="black")
+                with patch(GENERATOR, return_value=generator):
+                    result = await studio.card(job, save)
+                # analysis + extract + one check + 4 photos; no white version at all
+                self.assertEqual(len(generator.calls), 7)
+                self.assertEqual({call[1] for call in generator.calls if call[0] == "live"}, {"black"})
+                self.assertEqual(list(result["images"]), ["black"])
+                self.assertEqual(len(result["images"]["black"]), 6)
+                self.assertEqual(list(result["vendor_codes"]), ["black"])
+                self.assertEqual(list(result["article_prints"]), ["black"])
+                self.assertEqual(result["config"]["colors"], ["black"])
 
         asyncio.run(run())
 
@@ -232,15 +252,16 @@ class RedrawGeneratorTest(unittest.TestCase):
     def test_photo_generation_gets_only_the_shirt_print_and_optional_pose(self):
         calls = []
 
-        async def edit(files, prompt):
+        async def edit(files, prompt, quality=None):
             calls.append(([name for name, *_ in files], prompt))
+            self.assertEqual(quality, "low")  # model photos are cheap; print files keep image_quality
             return image()
 
         async def run():
             generator = Generator({}, load_config())
             generator.edit = edit
-            await generator.live_photo(b"shirt", image(), "white", 0, "female")
-            await generator.live_photo(b"shirt", image(), "white", 1, "female", pose=image())
+            await generator.live_photo(image(), image(), "white", 0, "female")
+            await generator.live_photo(image(), image(), "white", 1, "female", pose=image())
 
         asyncio.run(run())
         self.assertEqual(calls[0][0], ["main-product.png", "artwork.png"])
@@ -274,7 +295,7 @@ class RedrawGeneratorTest(unittest.TestCase):
             "selected": [1],
             "print_source": {"label": "PHOTO_INDEX=1"},
             "theme_match": True,
-            "main_print_side": "front",
+            "front_print": True,
             "single_print": True,
             "print_count": 1,
             "print_width": 0.5,

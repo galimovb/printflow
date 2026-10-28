@@ -25,27 +25,34 @@ GALLERY_ANALYSIS = (
     "model, a flat lay, a close-up). An infographic or a back view is never the print source.\n"
     "- theme_match (bool) and theme_reason (Russian): does the artwork itself fit the theme "
     '"{theme}"? Judge the drawing, not the listing title.\n'
-    "- main_print_side: front|back|both|unknown. A tiny neck or back logo does not count.\n"
-    "- print_count (int), single_print (bool), print_reason (Russian): separate prints on the garment. "
+    "Only the front of the torso matters: prints on sleeves, shoulders or the back are ignored in every "
+    "field below and never block the listing.\n"
+    "- front_print (bool): the front of the shirt carries a print; a tiny neck logo alone does not count.\n"
+    "- print_count (int), single_print (bool), print_reason (Russian): separate prints on the front. "
     "Elements placed close together form ONE print even if a small gap separates them: a caption "
     "or slogan right above or below an illustration is 1. Count separate prints only for elements in "
     "different zones of the shirt with a wide stretch of plain fabric between them: text on the chest "
     "plus a design near the hem is 2; a small chest logo plus a large design lower down is 2.\n"
-    "- print_width: width of the widest print as a share of the shirt front width between the side "
+    "- print_width: width of the widest front print as a share of the shirt front width between the side "
     "seams, 0..1. Measure the real extent, do not round down.\n"
-    "- reaches_edges (bool): any print touches or crosses a side seam, a sleeve, the collar or the "
-    "bottom hem.\n"
+    "- reaches_edges (bool): a front print touches or crosses a side seam, the armhole, the collar or "
+    "the bottom hem.\n"
+    "- shirt_color: white|black, the seller's shirt in the front photos. Light shirts (white, cream, light "
+    "gray, pastel) are white; dark shirts (black, navy, dark gray, any deep color) are black.\n"
     "- audience: female|male|unisex. female if the shirt is a women's cut or shown only on women; "
     "male if a men's cut or shown only on men; otherwise unisex.\n"
-    '- title: Russian, starts with "Футболка с принтом", max 60 characters, names the print.\n'
+    '- title: Russian, starts with "Футболка с принтом", max 60 characters. Rewrite the seller title '
+    '"{source_title}" to this template: keep its words about the print (phrases, names, characters); drop '
+    "the brand, article number, price, shop text, sizes, fabric, fit and color. If it says nothing about "
+    "the print, name the print from the photos.\n"
     "- description: Russian, max 400 characters, only what is visible in the print; no invented "
     "materials, brands or licenses.\n"
-    "If the theme or the print side is uncertain, set theme_match=false or main_print_side=unknown."
+    "If the theme or the front print is uncertain, set theme_match=false or front_print=false."
 )
 
 
-def gallery_analysis_prompt(theme: str) -> str:
-    return GALLERY_ANALYSIS.format(theme=theme)
+def gallery_analysis_prompt(theme: str, source_title: str = "") -> str:
+    return GALLERY_ANALYSIS.format(theme=theme, source_title=source_title.strip()[:300] or "-")
 
 
 def with_feedback(prompt: str, feedback: str) -> str:
@@ -57,7 +64,8 @@ def extract_print_prompt(expected_print: str = "", feedback: str = "") -> str:
     subject = f" ({expected_print})" if expected_print else ""
     prompt = (
         f"The photo shows a person wearing a T-shirt with a printed design{subject}. "
-        "Recreate ONLY that printed design as a flat print file in its original colors. "
+        "Recreate ONLY the main design on the front of the shirt as a flat print file in its original "
+        "colors; leave out any print on the sleeves or shoulders. "
         "Ignore the person, the shirt, folds, lighting, background and any seller text, stickers or "
         "watermarks outside the print. Show it front-on and upright even if the shirt is tilted or "
         "wrinkled; keep its original aspect ratio. Copy it 1:1: every element, letter (same language, "
@@ -81,15 +89,17 @@ VANISHING_INK = {
 }
 
 
-def recolor_print_prompt(color: str, feedback: str = "") -> str:
+def recolor_print_prompt(color: str, feedback: str = "", ratio: float | None = None) -> str:
     """Clean print file -> the same drawing with only vanishing ink adjusted."""
     ink, fix = VANISHING_INK[color]
+    shape = f" (width:height = {ratio:.2f})" if ratio else ""
     prompt = (
-        "artwork.png is a finished T-shirt print on a #90EE90 background. Make its version for a "
+        "artwork.png is a finished T-shirt print centered on a #90EE90 canvas. Make its version for a "
         f"{color.upper()} shirt. Keep the drawing identical: every line, shape, letter, proportion, "
         f"composition and saturated color stays exactly as it is. Change ONLY {ink} ink, which would "
-        f"vanish on {color} fabric: {fix}. Skin and faces stay natural. Same size and framing. "
-        "Background: solid flat #90EE90 everywhere outside the artwork."
+        f"vanish on {color} fabric: {fix}. Skin and faces stay natural. The artwork keeps exactly the "
+        f"same rectangle on the canvas{shape}: same position, width and height. Never extend, crop or "
+        "add content at any edge; the #90EE90 margins around it stay empty and flat."
     )
     return with_feedback(prompt, feedback)
 

@@ -30,12 +30,16 @@ class Source(BaseModel):
     image: HttpUrl
     title: str = ""
     images: list[HttpUrl] = Field(default_factory=list, max_length=20)
+    # True when the sender already collected the full gallery: the queue then never opens a browser.
+    gallery_complete: bool = False
 
 
 class SourceBatch(BaseModel):
     algorithm: Literal["standard", "source_redraw"] = "standard"
     theme: str = Field(min_length=2, max_length=500)
-    sources: list[Source] = Field(min_length=1, max_length=20)
+    sources: list[Source] = Field(min_length=1, max_length=60)
+    # Cards to generate; the remaining sources are a reserve that replaces rejected prints.
+    design_limit: int | None = Field(default=None, ge=1, le=20)
     colors: list[Literal["white", "black"]] = Field(
         default_factory=lambda: default_colors(read_env()), min_length=1, max_length=2
     )
@@ -78,24 +82,30 @@ def router(container):
         from printflow.wb_studio.infrastructure.wb.search import normalize_cards
 
         raw = [
-            {"url": str(x.url), "image": str(x.image), "title": x.title, "images": [str(url) for url in x.images]}
+            {
+                "url": str(x.url),
+                "image": str(x.image),
+                "title": x.title,
+                "images": [str(url) for url in x.images],
+                "gallery_complete": x.gallery_complete and bool(x.images),
+            }
             for x in body.sources
         ]
         sources = normalize_cards(raw, len(raw))
         if len(sources) != len(raw):
             raise HTTPException(422, "Нужны уникальные ссылки карточек WB и HTTPS фотографии")
         config = container.wb_studio.configuration(body.colors, body.algorithm)
-        payload = {"kind": JobKind.WB_DISCOVER.value, "theme": body.theme, "limit": len(sources), "config": config}
-        digest = hashlib.sha256(
-            json.dumps([payload, sources], sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()[:24]
+        payload = {
+            "kind": JobKind.WB_DISCOVER.value,
+            "theme": body.theme,
+            "limit": len(sources),
+            "config": config,
+            "design_limit": body.design_limit,
+            # In the payload, not saved afterwards: a worker may claim the job the moment it exists.
+            "sources": sources,
+        }
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
         job, created = container.job_repository.create(payload, product=PRODUCT, external_id="wb-sources:" + digest)
-        if created:
-            container.job_repository.save_progress(
-                job.id,
-                stage="sources_imported",
-                result={"sources": sources, "query": body.theme, "sort": "imported", "origin": "manual_source_list"},
-            )
         return {"id": job.id, "created": created}
 
     @secure.post("/urls")

@@ -3,7 +3,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 SM_HOST=0.0.0.0 SM_DATA_DIR=/data
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-montserrat fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-montserrat fonts-dejavu-core xvfb xauth && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 COPY printflow/requirements.txt printflow/
@@ -14,4 +14,7 @@ RUN python -m playwright install --with-deps chromium
 COPY printflow printflow
 
 EXPOSE 8090
-CMD ["python", "-m", "printflow"]
+# Virtual display: the WB browser runs with a window, which WB challenges far less than headless.
+# xvfb-run hangs as PID 1, so the display is started directly.
+ENV DISPLAY=:99
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & exec python -m printflow"]

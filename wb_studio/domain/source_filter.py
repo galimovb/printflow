@@ -21,10 +21,10 @@ def assess(data, count, max_print_width=0.9):
         reasons.append("Принт доходит до швов, рукава, ворота или низа футболки")
     if data.get("theme_match") is not True:
         reasons.append("Принт не соответствует теме или соответствие не подтверждено")
-    if data.get("main_print_side") != "front":
-        reasons.append("Основной принт не подтверждён только на передней стороне футболки")
+    if data.get("front_print") is not True:
+        reasons.append("На лицевой стороне нет принта или он не подтверждён")
     if data.get("single_print") is not True or type(data.get("print_count")) is not int or data.get("print_count") != 1:
-        reasons.append("Не подтверждён один принт: отдельные верхний и нижний рисунки не допускаются")
+        reasons.append("На лицевой стороне несколько отдельных принтов далеко друг от друга")
     photos = data.get("photos", [])
     indexed = {}
     for photo in photos if isinstance(photos, list) else []:
@@ -88,5 +88,5 @@ def assess(data, count, max_print_width=0.9):
         "print_reason": data.get("print_reason", ""),
         "theme_match": data.get("theme_match"),
         "theme_reason": data.get("theme_reason", ""),
-        "main_print_side": data.get("main_print_side"),
+        "front_print": data.get("front_print"),
     }

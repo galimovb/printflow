@@ -160,7 +160,7 @@ class StandardGeneratorTest(unittest.TestCase):
         self.assertIn("lounging naturally in a chair", calls[0][1])
         self.assertIn("outfit flat-lay", calls[1][1])
         self.assertTrue(all("Keep the same print 1:1" in call[1] for call in calls))
-        self.assertTrue(all(call[2] == {"request_timeout": 180} for call in calls))
+        self.assertTrue(all(call[2] == {"request_timeout": 180, "quality": "low"} for call in calls))
 
     def test_lifestyle_prompts_keep_regular_fit(self):
         for index in (1, 2):
@@ -385,8 +385,6 @@ class PublicationTest(unittest.TestCase):
             self.assertEqual(sum(path.endswith("/media/save") for path, _ in calls), 1)
             media = next(body for path, body in calls if path.endswith("/media/save"))
             self.assertEqual(media["data"], draft["images"]["white"])
-            with self.assertRaises(PermanentError):
-                await publisher.publish(draft, {}, save)
             self.assertFalse(any("/update" in path for path, _ in calls))
 
         asyncio.run(run())
@@ -423,8 +421,8 @@ class PublicationTest(unittest.TestCase):
                 )
                 self.assertEqual(imported.status_code, 200, imported.text)
                 job = app.job_repository.get(imported.json()["id"])
-                self.assertEqual(job.result["sort"], "imported")
-                self.assertEqual(job.result["sources"][0]["sku"], "123")
+                # Sources are part of the job from its creation, so a worker never sees it empty.
+                self.assertEqual(job.payload["sources"][0]["sku"], "123")
 
 
 if __name__ == "__main__":

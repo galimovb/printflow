@@ -1,15 +1,15 @@
 import copy,unittest
 from printflow.wb_studio.domain.source_filter import assess
 class SourceFilterTest(unittest.TestCase):
- def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'main_print_side':'front','print_width':.55,'reaches_edges':False,'print_source':0,'selected':[0,1,2,3],
+ def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'front_print':True,'print_width':.55,'reaches_edges':False,'print_source':0,'selected':[0,1,2,3],
   'photos':[{'index':i,'role':'front','same_print':True,'normal_light':True,'adult':True} for i in range(4)]}
  def test_accepts_four_matching_fronts(self):self.assertTrue(assess(self.data(),4)['accepted'])
  def test_rejects_wrong_or_unknown_theme(self):
   for value in (False,None):
    d=self.data();d['theme_match']=value;self.assertFalse(assess(d,4)['accepted'])
- def test_rejects_back_or_two_sided_print(self):
-  for value in ('back','both','unknown'):
-   d=self.data();d['main_print_side']=value;self.assertFalse(assess(d,4)['accepted'])
+ def test_rejects_shirt_without_front_print(self):
+  for value in (False,None):
+   d=self.data();d['front_print']=value;self.assertFalse(assess(d,4)['accepted'])
  def test_missing_views_are_planned_from_valid_front_only(self):
   d=self.data();d['photos'][2]['role']='back';d['photos'][3]['normal_light']=False
   r=assess(d,4);self.assertTrue(r['accepted']);self.assertEqual(r['selected'],[0,1,0,0]);self.assertEqual(r['generated_extra_frames'],[2,3]);self.assertEqual(len(r['rejected_photos']),2)

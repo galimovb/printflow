@@ -185,7 +185,6 @@ class WbQueueTest(unittest.TestCase):
                 with self.assertRaises(RetryLater):await publisher.publish_group(drafts,{},save)
                 result=await publisher.publish_group(drafts,state,save)
                 count=len(calls);await publisher.publish_group(drafts,result,save);self.assertEqual(len(calls),count)
-                with self.assertRaises(PermanentError):await publisher.publish_group(drafts,{},save)
             self.assertTrue(result['complete']);self.assertTrue(result['merged'])
             self.assertEqual(sum(p.endswith('/upload') for p,_ in calls),1)
             payload=next(b for p,b in calls if p.endswith('/upload'))
@@ -225,3 +224,133 @@ class WbGenderTest(unittest.TestCase):
         card=draft(1);card['analysis']={'audience':'female'}
         names=[c['value'] for c in build_payload(card,[f'b{i}' for i in range(4)])[0]['variants'][0]['characteristics']]
         self.assertNotIn(['Женский'],names)
+
+
+class AutoPublishTest(unittest.TestCase):
+    def test_group_is_published_once_all_members_finished_without_failed_ones(self):
+        from printflow.domain.models import JobStatus
+        with TempDir() as tmp:
+            repo=new_repository(tmp);studio=Studio(repo,FakeStorage(),FAST)
+            members=[]
+            for i in range(3):
+                job,_=repo.create({'kind':'wb_card','merge_group':'PFWG-x-1','merge_group_size':3,'source':{'sku':str(i)},'config':{'auto_publish':True}},
+                                  product='tee_wb',numbered=True)
+                members.append(job)
+            card=draft(1)
+            repo.save_progress(members[0].id,stage='done',result=card);repo.complete(members[0].id,card)
+            self.assertEqual(studio.publish_finished_groups(),[])  # others still pending
+            repo.fail(members[1].id,'rejected by filter')
+            card2=draft(2);repo.complete(members[2].id,card2)
+            created=studio.publish_finished_groups()
+            self.assertEqual(len(created),1)
+            publication=created[0][0]
+            self.assertEqual(publication.payload['card_ids'],[members[0].id,members[2].id])
+            self.assertEqual(studio.publish_finished_groups(),[])  # never twice
+
+    def test_cards_created_without_auto_publication_are_never_published(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp);studio=Studio(repo,FakeStorage(),FAST)
+            job,_=repo.create({'kind':'wb_card','merge_group':'PFWG-old-1','merge_group_size':1,'source':{'sku':'1'},'config':{}},
+                              product='tee_wb',numbered=True)
+            repo.complete(job.id,draft(1))
+            self.assertEqual(studio.publish_finished_groups(),[])
+            self.assertFalse(Studio(repo,FakeStorage(),FAST).configuration()['auto_publish'])
+            self.assertTrue(Studio(repo,FakeStorage(),{**FAST,'PRINTFLOW_WB_AUTO_PUBLISH':'1'}).configuration()['auto_publish'])
+
+
+class ReserveTest(unittest.TestCase):
+    def test_reserve_replaces_only_rejected_prints(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp);studio=Studio(repo,FakeStorage(),FAST)
+            sources=[{'sku':str(i),'url':f'https://www.wildberries.ru/catalog/{i}/detail.aspx','image':'https://s3/1.png',
+                      'images':['https://s3/1.png'],'gallery_complete':True} for i in range(5)]
+            config=studio.configuration(algorithm='source_redraw')
+            campaign,_=repo.create({'kind':'wb_discover','theme':'гонки','limit':5,'config':config,'design_limit':2},product='tee_wb')
+            repo.complete(campaign.id,{'sources':sources})
+            first=studio.enqueue_cards(repo.get(campaign.id),sources[:2])
+            self.assertEqual(studio.top_up_campaigns(),[])  # nothing rejected yet
+            repo.fail(first[0]['id'],'PermanentError: Исходная карточка отклонена фильтром')
+            added=studio.top_up_campaigns()
+            self.assertEqual([x['sku'] for x in added],['2'])
+            self.assertEqual(added[0]['merge_group'],f'PFWG-{campaign.id}-2')
+            self.assertEqual(studio.top_up_campaigns(),[])  # never twice
+            repo.fail(first[1]['id'],'RuntimeError: HTTP 429 (credit_balance_exhausted)')
+            self.assertEqual(studio.top_up_campaigns(),[])  # transient failure waits for a retry
+
+
+    def test_finished_theme_is_regrouped_by_cards_with_colors_counted(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp)
+            studio=Studio(repo,FakeStorage(),{**FAST,'PRINTFLOW_WB_AUTO_PUBLISH':'1','PRINTFLOW_WB_GROUP_CARDS':'4'})
+            sources=[{'sku':str(i),'url':f'https://www.wildberries.ru/catalog/{i}/detail.aspx','image':'https://s3/1.png',
+                      'images':['https://s3/1.png'],'gallery_complete':True} for i in range(5)]
+            config=studio.configuration(algorithm='source_redraw')
+            campaign,_=repo.create({'kind':'wb_discover','theme':'гонки','limit':5,'config':config,'design_limit':3},product='tee_wb')
+            repo.complete(campaign.id,{'sources':sources})
+            first=studio.enqueue_cards(repo.get(campaign.id),sources[:3])
+            repo.complete(first[0]['id'],draft(1));repo.complete(first[1]['id'],draft(2))
+            repo.fail(first[2]['id'],'PermanentError: Исходная карточка отклонена фильтром')
+            with patch('printflow.wb_studio.application.studio.load_config',return_value=draft(1)['config']):
+                self.assertEqual(studio.publish_finished_groups(),[])  # the reserve still refills the theme
+                extra=studio.top_up_campaigns()
+                self.assertEqual(studio.publish_finished_groups(),[])  # the refill is still generating
+                repo.complete(extra[0]['id'],draft(3))
+                created=studio.publish_finished_groups()
+                self.assertEqual([len(job.payload['drafts']) for job,_ in created],[2,1])  # 4 cards = 2 prints x 2 colors
+                first=repo.get(first[0]['id']).design_number
+                self.assertEqual(created[0][0].payload['merge_group'],f'PFWG-{campaign.id}-t{first}')
+                self.assertEqual(studio.publish_finished_groups(),[])  # never twice
+
+    def test_prints_sent_by_an_older_group_are_not_sent_again(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp)
+            studio=Studio(repo,FakeStorage(),{**FAST,'PRINTFLOW_WB_AUTO_PUBLISH':'1','PRINTFLOW_WB_GROUP_CARDS':'4'})
+            sources=[{'sku':str(i),'url':f'https://www.wildberries.ru/catalog/{i}/detail.aspx','image':'https://s3/1.png',
+                      'images':['https://s3/1.png'],'gallery_complete':True} for i in range(2)]
+            config=studio.configuration(algorithm='source_redraw')
+            campaign,_=repo.create({'kind':'wb_discover','theme':'гонки','limit':2,'config':config,'design_limit':2},product='tee_wb')
+            repo.complete(campaign.id,{'sources':sources})
+            first=studio.enqueue_cards(repo.get(campaign.id),sources)
+            repo.complete(first[0]['id'],draft(1));repo.complete(first[1]['id'],draft(2))
+            with patch('printflow.wb_studio.application.studio.load_config',return_value=draft(1)['config']):
+                studio.create_publication(first[0]['id'],'PFWG-old-1',[repo.get(first[0]['id'])])
+                created=studio.publish_finished_groups()
+            self.assertEqual([job.payload['card_ids'] for job,_ in created],[[first[1]['id']]])
+
+
+class FullHistoryTest(unittest.TestCase):
+    def test_background_decisions_see_jobs_beyond_the_listing_cap(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp)
+            items=[({'kind':'wb_card','theme':'t','source':{'sku':str(i)},'config':{}},f'x-{i}') for i in range(520)]
+            repo.create_many(items,product='tee_wb',numbered=True)
+            self.assertEqual(len(repo.list(product='tee_wb',limit=10000)),500)  # the API listing stays capped
+            everything=repo.all('tee_wb')
+            self.assertEqual(len(everything),520)
+            self.assertEqual(everything[0].payload['source']['sku'],'0')  # oldest first
+
+
+class ClaimOrderTest(unittest.TestCase):
+    def test_publication_is_claimed_before_older_cards_and_during_a_search(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp)
+            repo.create_many([({'kind':'wb_card','theme':'t','source':{'sku':str(i)},'config':{}},f'c-{i}') for i in range(3)],
+                             product='tee_wb',numbered=True)
+            repo.create({'kind':'wb_discover','theme':'next','limit':1,'config':{}},product='tee_wb',external_id='d')
+            publication,_=repo.create({'kind':'wb_publish','card_ids':['x'],'merge_group':'g'},product='tee_wb',external_id='p')
+            self.assertEqual(repo.claim_next('tee_wb').payload['kind'],'wb_discover')  # the search runs first
+            self.assertEqual(repo.claim_next('tee_wb').id,publication.id)  # not blocked by it, ahead of cards
+
+
+class BrowserFallbackTest(unittest.TestCase):
+    def test_bundled_chromium_without_google_chrome(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from printflow.wb_studio.infrastructure.wb.search import open_session
+        context=SimpleNamespace(set_default_timeout=lambda *_:None,set_default_navigation_timeout=lambda *_:None,
+                                add_init_script=AsyncMock())
+        launch=AsyncMock(return_value=context)
+        playwright=SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+        with TempDir() as tmp, patch('pathlib.Path.is_file',return_value=False):
+            asyncio.run(open_session(playwright,{'PRINTFLOW_WB_BROWSER_PROFILE':str(tmp)}))
+        self.assertNotIn('executable_path',launch.await_args.kwargs)

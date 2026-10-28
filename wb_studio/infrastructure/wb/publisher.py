@@ -115,7 +115,11 @@ class Publisher:
                     if path.startswith("/api/v2/")
                     else "https://content-api.wildberries.ru"
                 )
-                response = await client.post(base + path, json=body, headers={"Authorization": self.token})
+                try:
+                    response = await client.post(base + path, json=body, headers={"Authorization": self.token})
+                except httpx.TransportError:
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
                 if response.status_code == 429:
                     await asyncio.sleep(min(60, 5 * (attempt + 1)))
                     continue
@@ -124,7 +128,7 @@ class Publisher:
                 if isinstance(data, dict) and data.get("error"):
                     raise PermanentError("WB: " + str(data.get("errorText") or data.get("additionalErrors") or data))
                 return data
-        raise RetryLater("WB rate limit", delay_sec=60)
+        raise RetryLater("WB rate limit or connection drops", delay_sec=60)
 
     async def lookup(self, vendor):
         data = await self.request(
@@ -155,11 +159,10 @@ class Publisher:
         state = copy.deepcopy(state)
         if state.get("complete"):
             return state
-        found = {color: await self.lookup(vendor) for color, vendor in draft["vendor_codes"].items()}
-        if any(found.values()) and not state.get("submission_started"):
-            raise PermanentError(
-                "Vendor code already exists outside this publication. Existing cards are not modified."
-            )
+        # New vendor codes never collide with the cabinet, so cards are looked up only after upload.
+        found = dict.fromkeys(draft["vendor_codes"])
+        if state.get("submission_started"):
+            found = {color: await self.lookup(vendor) for color, vendor in draft["vendor_codes"].items()}
         if not state.get("barcodes"):
             count = len(draft["images"]) * len(draft["config"]["sizes"])
             data = await self.request("/content/v2/barcodes", {"count": count})

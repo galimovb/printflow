@@ -11,10 +11,10 @@ from printflow.wb_studio.paths import CONFIG_DIR
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 SOURCE_REDRAW = {
-    "gallery_revision": "source-redraw-v13",
-    "vision_model": "gpt-6-astra",
-    # Counts chest-and-hem prints as two and a caption next to a drawing as one, consistently.
-    "analysis_model": "gpt-6-astra",
+    "gallery_revision": "source-redraw-v15",
+    # Five times cheaper than gpt-6-astra per token; both answer JSON with low reasoning effort.
+    "vision_model": "gpt-6.1-sol",
+    "analysis_model": "gpt-6.1-sol",
     # Prints wider than this share of the shirt front are rejected by the gallery filter.
     "max_print_width": 0.9,
 }
@@ -50,4 +50,12 @@ def merge_designs(env) -> int:
     value = int(env.get("PRINTFLOW_WB_MERGE_DESIGNS", "10"))
     if not 1 <= value <= 15:
         raise ValueError("PRINTFLOW_WB_MERGE_DESIGNS: 1..15 принтов (до 30 вариантов WB с двумя цветами)")
+    return value
+
+
+def group_cards(env) -> int:
+    """WB cards per group for themes with a reserve; every color is a separate card."""
+    value = int(env.get("PRINTFLOW_WB_GROUP_CARDS", "10"))
+    if not 1 <= value <= 30:
+        raise ValueError("PRINTFLOW_WB_GROUP_CARDS: 1..30 карточек WB в группе")
     return value

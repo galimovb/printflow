@@ -30,3 +30,5 @@ venv/
 .cursor/
 .DS_Store
 Thumbs.db
+data-wb/
+data-wb-queue/

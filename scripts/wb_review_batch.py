@@ -43,33 +43,30 @@ def image_uri(url, width=1000):
 
 
 def report(out, entries):
+    """Finished cards only: seller photo next to the white and black frame of the same index."""
     esc=lambda value:html.escape(str(value))
-    def pic(url, caption, width=1000):
-        return f'<figure><img loading="lazy" src="{image_uri(url,width)}"><figcaption>{esc(caption)}</figcaption></figure>'
+    def pic(url, caption):
+        return f'<figure><img loading="lazy" src="{image_uri(url,560)}"><figcaption>{esc(caption)}</figcaption></figure>'
+    done=[e for e in entries if e['status']=='done' and e['result'].get('images')]
     sections=[]
-    done=[e for e in entries if e['status']=='done']
     for n,e in enumerate(done,1):
-        r=e['result'];a=r['analysis'];source=e['source']
-        body=f'<section id="card-{n}"><h2>{n}. {esc(r["text"]["title"])}</h2><p>Исходный артикул WB: {esc(source["sku"])}. Все изображения встроены в этот файл.</p>'
-        if r.get('print_crop'):
-            body+='<h3>Автоматически выделенная область принта на ткани</h3><div class="print">'+pic(r['print_crop'],'Эта область передаётся на извлечение, вместо всей страницы продавца')+'</div>'
-            body+='<details><summary>Автоматические проверки</summary><pre>'+esc(json.dumps({'location':r.get('print_location'),'prints':r.get('print_checks'),'photos':r.get('photo_checks')},ensure_ascii=False,indent=2))+'</pre></details>'
-        for color,label in [('white','Белая футболка'),('black','Чёрная футболка')]:
-            body+=f'<h3>{label}: до → после</h3><div class="comparisons">'
-            for i,index in enumerate(a['selected']):
-                body+='<div class="pair">'+pic(r['source_photos'][str(index)],f'До: исходник {index+1}')+pic(r['images'][color][i],f'После: кадр {i+1}')+'</div>'
-            body+='</div><h3>Извлечённый печатный принт</h3><div class="print">'+pic(r['print_variants'][color],label,1200)+'</div>'
-            body+='<details><summary>Все 6 итоговых слайдов</summary><div class="gallery">'+''.join(pic(url,f'Слайд {i+1}',800) for i,url in enumerate(r['images'][color]))+'</div></details>'
-        body+='<details><summary>Все исходные фотографии и результат отбора</summary><div class="gallery">'
-        body+=''.join(pic(url,f'Исходник {int(i)+1}',700) for i,url in r['source_photos'].items())
-        body+='</div><pre>'+esc(json.dumps(a['filter'],ensure_ascii=False,indent=2))+'</pre></details></section>'
-        sections.append(body)
-    failures=[e for e in entries if e['status'] in ('failed','parse_failed')]
-    failed='<details><summary>Отклонённые и неудачные попытки: '+str(len(failures))+'</summary>'+''.join('<p>'+esc(e['source'].get('sku',''))+': '+esc(e.get('error',''))+'</p>' for e in failures)+'</details>'
-    document='''<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WB — сравнение до и после</title>
-<style>body{font:16px/1.5 system-ui;margin:0;background:#f1f2f4;color:#20232a}main{max-width:1600px;margin:auto;padding:24px}section{background:white;padding:24px;margin:28px 0;border-radius:16px}h1,h2,h3{line-height:1.2}figure{margin:0}img{width:100%;height:auto;display:block}figcaption{padding:8px;background:#eef0f2}.comparisons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.print{max-width:500px;background:#ddd}details{margin:24px 0}summary{cursor:pointer;font-weight:600;padding:12px;background:#eef0f2}pre{white-space:pre-wrap}nav{display:flex;gap:12px;flex-wrap:wrap}@media(max-width:800px){.comparisons{grid-template-columns:1fr}.gallery{grid-template-columns:repeat(2,1fr)}main,section{padding:12px}}</style><main><h1>WB: исходники и перерисовка</h1>'''
-    document+=f'<p>Готовых принтов: {len(done)}. По 2 цвета и 6 слайдов на цвет. Публикация WB отключена. Файл самодостаточный: интернет и дополнительные папки не нужны.</p><nav>'
-    document+=''.join(f'<a href="#card-{i}">Принт {i}</a>' for i in range(1,len(done)+1))+'</nav>'+''.join(sections)+failed+'</main></html>'
+        r=e['result'];selected=r['analysis'].get('selected') or [0,0,0,0]
+        rows=''.join('<div class="row">'+pic(r['source_photos'][str(selected[i])],f'Фото продавца {selected[i]+1}')
+            +pic(r['images']['white'][i],f'Белая, кадр {i+1}')+pic(r['images']['black'][i],f'Чёрная, кадр {i+1}')+'</div>'
+            for i in range(4))
+        codes=' / '.join(r.get('vendor_codes',{}).values())
+        sections.append(f'<section id="p{n}"><h2>{n}. {esc(r["text"]["title"])}</h2><p class="meta">{esc(codes)} · '
+            f'<a href="{esc(r.get("source_url",""))}" target="_blank" rel="noopener">исходник на WB</a></p>{rows}</section>')
+    nav=''.join(f'<a href="#p{i}">{i}</a>' for i in range(1,len(done)+1))
+    document=f'''<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WB: готовые карточки</title>
+<style>:root{{--bg:#f1f2f4;--card:#fff;--fg:#20232a;--mute:#6b7280;--cap:#eef0f2}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#16181d;--card:#20232a;--fg:#e8eaee;--mute:#9aa1ad;--cap:#2a2e36}}}}
+body{{font:15px/1.45 system-ui,sans-serif;margin:0;background:var(--bg);color:var(--fg)}}main{{max-width:1200px;margin:auto;padding:16px}}
+nav{{position:sticky;top:0;background:var(--bg);padding:8px 0;display:flex;flex-wrap:wrap;gap:6px;z-index:1}}nav a{{padding:4px 10px;border-radius:8px;background:var(--card);color:inherit;text-decoration:none}}
+section{{background:var(--card);border-radius:14px;padding:16px;margin:16px 0}}h2{{margin:0 0 4px;font-size:18px}}.meta{{margin:0 0 12px;color:var(--mute)}}.meta a{{color:inherit}}
+.row{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:8px}}figure{{margin:0}}img{{width:100%;display:block;border-radius:8px 8px 0 0;aspect-ratio:3/4;object-fit:cover;background:var(--cap)}}
+figcaption{{font-size:13px;padding:4px 8px;background:var(--cap);border-radius:0 0 8px 8px}}</style>
+<main><h1>WB: готовые карточки</h1><p class="meta">Готовых принтов: {len(done)}. В каждой строке: фото продавца и два наших кадра с тем же номером.</p><nav>{nav}</nav>{''.join(sections)}</main></html>'''
     (out/'review-portable.html').write_text(document,encoding='utf-8')
 
 

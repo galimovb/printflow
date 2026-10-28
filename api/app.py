@@ -52,9 +52,15 @@ def create_app(container: AppContainer | None = None, *, background: bool = True
         tasks: list[asyncio.Task] = []
         if background:
             from printflow.config import read_env
-            if read_env().get('PRINTFLOW_WB_ENABLED','0').lower() in ('1','true','yes'):
+            env = read_env()
+            def enabled(name, default='0'):
+                return env.get(name, default).lower() in ('1', 'true', 'yes')
+            if enabled('PRINTFLOW_WB_ENABLED'):
                 tasks.append(_background(container.wb_worker.run(stop),'tee_wb: studio queue'))
-            for pc in container.products.values():
+                tasks.append(_background(container.wb_studio.supervise(stop, enabled('PRINTFLOW_WB_AUTO_PUBLISH')),
+                                         'tee_wb: reserve and auto-publication'))
+            # PRINTFLOW_PRODUCTS_ENABLED=0 runs the WB studio alone, without Ozon products and order handlers.
+            for pc in (container.products.values() if enabled('PRINTFLOW_PRODUCTS_ENABLED', '1') else ()):
                 tasks.append(_background(pc.queue_worker.run(stop), f"{pc.name}: очередь"))
                 if pc.order_watcher is not None:
                     tasks.append(_background(pc.order_watcher.run(stop), f"{pc.name}: заказы"))

@@ -4,15 +4,18 @@ discover -> one WB_CARD job per product -> manual review -> WB_PUBLISH per merge
 """
 
 import asyncio
+import collections
+import contextlib
 import copy
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable
 from datetime import UTC, datetime
 
 from printflow.domain.errors import PermanentError
 from printflow.domain.models import JobKind, JobStatus
-from printflow.wb_studio.config import build_config, default_colors, load_config, merge_designs
+from printflow.wb_studio.config import build_config, default_colors, group_cards, load_config, merge_designs
 from printflow.wb_studio.domain.models import ALGORITHMS, PRODUCT, vendor_codes
 from printflow.wb_studio.infrastructure.generation import Generator
 from printflow.wb_studio.infrastructure.rendering.info_slides import check_information
@@ -40,6 +43,13 @@ LIVE_PUBLISH_KEYS = (
 )
 
 __all__ = ["Studio"]
+
+logger = logging.getLogger(__name__)
+
+
+def transient(job) -> bool:
+    """Failed on an error worth retrying (balance, network), not on a rejection of the print itself."""
+    return job.status == JobStatus.FAILED and not (job.error or "").startswith("PermanentError")
 
 
 def digest(value) -> str:
@@ -71,7 +81,10 @@ class Studio:
     def configuration(self, colors=None, algorithm="standard") -> dict:
         if algorithm not in ALGORITHMS:
             raise ValueError("Unknown WB generation algorithm")
-        return build_config(colors or default_colors(self.env), algorithm, merge_designs(self.env))
+        config = build_config(colors or default_colors(self.env), algorithm, merge_designs(self.env))
+        # Frozen per job: only cards created while auto-publication is on are ever published automatically.
+        config["auto_publish"] = self.env.get("PRINTFLOW_WB_AUTO_PUBLISH", "").lower() in ("1", "true", "yes")
+        return config
 
     def campaign(self, themes, limit, colors=None, design_limit=None, algorithm="standard"):
         config = self.configuration(colors, algorithm)
@@ -106,6 +119,9 @@ class Studio:
     @parsing_batch
     async def discovery(self, job, save):
         result = copy.deepcopy(job.result)
+        if not result.get("sources") and job.payload.get("sources"):
+            result.update(sources=job.payload["sources"], query=job.payload["theme"], sort="imported")
+            save("sources_imported", result)
         if not result.get("sources"):
             if job.payload.get("source_urls"):
                 sources = await search.resolve_product_urls(job.payload["source_urls"])
@@ -169,12 +185,12 @@ class Studio:
             raise PermanentError("Не найдено карточек с исходными фото")
         return selected
 
-    def enqueue_cards(self, job, selected):
+    def enqueue_cards(self, job, selected, first_group=1):
         config = job.payload["config"]
         size = config.get("merge_designs") or merge_designs(self.env)
         items = []
         for index, source in enumerate(selected):
-            group = f"PFWG-{job.id}-{index // size + 1}"
+            group = f"PFWG-{job.id}-{first_group + index // size}"
             payload = {
                 "kind": JobKind.WB_CARD.value,
                 "theme": job.payload["theme"],
@@ -225,6 +241,7 @@ class Studio:
             await self.remove_temporary(files)
             raise
         await self.remove_temporary(files)
+        config = {**config, "colors": result.get("colors", config["colors"])}
         result.update(
             vendor_codes=vendor_codes(job.design_number, config["colors"]),
             source_url=job.payload["source"].get("url", ""),
@@ -251,7 +268,7 @@ class Studio:
 
     async def save_article_prints(self, job, result: dict, files: CardFiles) -> dict:
         """Printable PNGs named by WB vendor code; job files stay resumable."""
-        codes = vendor_codes(job.design_number, job.payload["config"]["colors"])
+        codes = vendor_codes(job.design_number, result.get("colors", job.payload["config"]["colors"]))
         result["vendor_codes"] = codes
         canonical = result.setdefault("article_prints", {})
         for color, code in codes.items():
@@ -273,12 +290,13 @@ class Studio:
         return await asyncio.wait_for(request, self.photo_timeout)
 
     def observed_images(self):
-        for card in self.repo.list(product=PRODUCT, limit=1000):
+        for card in self.repo.all(PRODUCT):
             yield from card.payload.get("source", {}).get("images", [])
 
     # --- publication ------------------------------------------------------------
 
     def enqueue_publication(self, card_id):
+        """Manual publication after review: the whole merge group must be finished and reviewed."""
         card = self.repo.get(card_id)
         if not card or card.product != PRODUCT or card.kind != JobKind.WB_CARD:
             raise ValueError("Studio card not found")
@@ -290,6 +308,9 @@ class Studio:
             raise ValueError("Состав группы ещё не сформирован")
         if any(m.status != JobStatus.DONE or not m.result.get("review_required") for m in members):
             raise ValueError("Сначала дождитесь готовности и проверьте все принты группы")
+        return self.create_publication(card_id, group, members)
+
+    def create_publication(self, card_id, group, members):
         # Keep the exact immutable member list, including the final partial group.
         current = load_config()
         drafts = []
@@ -310,6 +331,127 @@ class Studio:
         }
         external_id = "wb-publish-group:" + group if group else "wb-publish:" + card_id
         return self.repo.create(payload, product=PRODUCT, external_id=external_id)
+
+    def publish_finished_groups(self) -> list:
+        """Auto-publication: a merge group goes to WB once every member has finished.
+
+        Only cards created with auto_publish in their config qualify; older cards always wait for review.
+        Failed members are left out, so one rejected print never blocks the other designs.
+        """
+        jobs = self.repo.all(PRODUCT)
+        published = {j.payload.get("merge_group") for j in jobs if j.kind == JobKind.WB_PUBLISH}
+        themed = {j.id for j in jobs if j.kind == JobKind.WB_DISCOVER and j.payload.get("design_limit")}
+        groups = collections.defaultdict(list)
+        for job in jobs:
+            group = job.payload.get("merge_group")
+            auto = job.payload.get("config", {}).get("auto_publish") is True
+            if job.payload.get("campaign_id") in themed:
+                continue  # regrouped by publish_finished_themes
+            if job.kind == JobKind.WB_CARD and group and auto and group not in published:
+                groups[group].append(job)
+        created = self.publish_finished_themes(jobs, published)
+        for group, members in groups.items():
+            if len(members) != members[0].payload["merge_group_size"]:
+                continue
+            if any(m.status not in (JobStatus.DONE, JobStatus.FAILED) for m in members):
+                continue
+            ready = sorted(
+                (m for m in members if m.status == JobStatus.DONE and m.result.get("review_required")),
+                key=lambda m: m.design_number,
+            )
+            if ready:
+                created.append(self.create_publication(ready[0].id, group, ready))
+        return created
+
+    def publish_finished_themes(self, jobs, published) -> list:
+        """A theme with a reserve goes to WB once nothing is left to generate or refill.
+
+        Its finished cards are regrouped in order, group_cards WB cards per group with every color counted,
+        so only the last group of a theme can be partial.
+        """
+        per_group = group_cards(self.env)
+        # A print already sent in any publication (an older per-batch group included) is never sent again.
+        sent = {card for job in jobs if job.kind == JobKind.WB_PUBLISH for card in job.payload.get("card_ids", [])}
+        created = []
+        for campaign, members in self.themes(jobs):
+            if not campaign.payload["config"].get("auto_publish") or self.refill(campaign, members):
+                continue
+            if any(m.status not in (JobStatus.DONE, JobStatus.FAILED) or transient(m) for m in members):
+                continue
+            ready = sorted(
+                (
+                    m
+                    for m in members
+                    if m.status == JobStatus.DONE and m.result.get("review_required") and m.id not in sent
+                ),
+                key=lambda m: m.design_number,
+            )
+            # A print may have one or two colors; every color is a WB card.
+            groups, current, cards = [], [], 0
+            for member in ready:
+                count = len(member.result.get("vendor_codes") or campaign.payload["config"]["colors"])
+                if current and cards + count > per_group:
+                    groups.append(current)
+                    current, cards = [], 0
+                current.append(member)
+                cards += count
+            if current:
+                groups.append(current)
+            for members in groups:
+                # Named by its first print: stays unique when later prints of the theme are grouped again.
+                group = f"PFWG-{campaign.id}-t{members[0].design_number}"
+                if group not in published:
+                    created.append(self.create_publication(members[0].id, group, members))
+        return created
+
+    @staticmethod
+    def themes(jobs):
+        """Finished theme searches with a design limit, each with all of its cards."""
+        cards = collections.defaultdict(list)
+        for job in jobs:
+            if job.kind == JobKind.WB_CARD and job.payload.get("campaign_id"):
+                cards[job.payload["campaign_id"]].append(job)
+        for campaign in jobs:
+            done = campaign.kind == JobKind.WB_DISCOVER and campaign.status == JobStatus.DONE
+            if done and campaign.payload.get("design_limit"):
+                yield campaign, cards[campaign.id]
+
+    @staticmethod
+    def refill(campaign, members) -> list:
+        """Reserve sources a theme still needs: one for every card it lost to a permanent rejection."""
+        rejected = sum(m.status == JobStatus.FAILED and not transient(m) for m in members)
+        missing = campaign.payload["design_limit"] - (len(members) - rejected)
+        used = {m.payload["source"]["sku"] for m in members}
+        standard = campaign.payload["config"]["algorithm"] == "standard"
+        reserve = [
+            s for s in campaign.result.get("sources", [])
+            if s["sku"] not in used and (standard or s.get("gallery_complete"))
+        ]  # fmt: skip
+        return reserve[: max(0, missing)]
+
+    def top_up_campaigns(self) -> list:
+        """Reserve sources replace rejected prints, so a theme generates only as many cards as it still lacks.
+
+        Only a permanent rejection frees a slot; a card that failed on a transient error waits for a retry.
+        """
+        created = []
+        for campaign, members in self.themes(self.repo.all(PRODUCT)):
+            if portion := self.refill(campaign, members):
+                groups = {m.payload["merge_group"] for m in members}
+                created += self.enqueue_cards(campaign, portion, first_group=len(groups) + 1)
+        return created
+
+    async def supervise(self, stop: asyncio.Event, publish: bool, interval: float = 60) -> None:
+        """Background loop: refill themes from their reserve and, if enabled, publish finished groups."""
+        while not stop.is_set():
+            added = [card for card in self.top_up_campaigns() if card["created"]]
+            if added:
+                logger.info("WB: из запаса добавлено %s товаров", len(added))
+            for job, was_created in self.publish_finished_groups() if publish else ():
+                if was_created:
+                    logger.info("WB: группа %s поставлена на публикацию", job.payload["merge_group"])
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), interval)
 
     async def publish(self, job, save):
         drafts = job.payload.get("drafts")

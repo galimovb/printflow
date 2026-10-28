@@ -1,0 +1,22 @@
+# WB studio alone: no Ozon products or order handlers, so it never doubles another PrintFlow instance.
+# Own data folder: jobs created by earlier local runs are never picked up by this queue.
+#   docker compose -f docker-compose.yml -f docker-compose.wb.yml up -d --build
+services:
+  migrate:
+    volumes:
+      - ./data-wb-queue:/data
+  app:
+    volumes:
+      - ./data-wb-queue:/data
+      - ./wb_studio/config/config.json:/app/printflow/wb_studio/config/config.json:ro
+    environment:
+      PRINTFLOW_PRODUCTS_ENABLED: "0"
+      PRINTFLOW_WB_ENABLED: "1"
+      PRINTFLOW_WB_AUTO_PUBLISH: "${PRINTFLOW_WB_AUTO_PUBLISH:-1}"
+      PRINTFLOW_WB_HEADLESS: "0"
+      PRINTFLOW_LOG_DIR: /data/logs
+      PRINTFLOW_WB_PHOTO_QUALITY: "${PRINTFLOW_WB_PHOTO_QUALITY:-low}"
+      PRINTFLOW_WB_EXTRACT_QUALITY: "${PRINTFLOW_WB_EXTRACT_QUALITY:-medium}"
+      PRINTFLOW_WB_IMAGE_QUALITY: "${PRINTFLOW_WB_IMAGE_QUALITY:-medium}"
+      PRINTFLOW_WB_REASONING_EFFORT: "${PRINTFLOW_WB_REASONING_EFFORT:-low}"
+      PRINTFLOW_WB_ANALYSIS_MODEL: "${PRINTFLOW_WB_ANALYSIS_MODEL:-gpt-6.1-sol}"

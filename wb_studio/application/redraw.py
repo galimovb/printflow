@@ -5,8 +5,8 @@
    up to four model photos, listing text. Rejected products stop here.
 3. The print is extracted once. A color version redraws that clean file only when
    its ink would vanish on the fabric. One shared check, one retry per file.
-4. Four model photos per color, all in parallel. A frame with its own seller photo
-   copies that pose; the rest use fixed scenes. Frames 5-6 are prebuilt slides.
+4. Four model photos, all in parallel, only in the seller's shirt color. A frame with its own
+   seller photo copies that pose; the rest use fixed scenes. Frames 5-6 are prebuilt slides.
 """
 
 from printflow.domain.errors import PermanentError
@@ -25,14 +25,16 @@ class RedrawPipeline:
     def __init__(self, studio, job, generator, files: CardFiles):
         self.studio = studio
         self.job = job
-        self.config = job.payload["config"]
+        self.config = dict(job.payload["config"])
         self.generator = generator
         self.files = files
         self.result = files.result
+        self.source_color = False
 
     async def run(self) -> None:
         await self.download_gallery()
         analysis = await self.analyze()
+        self.use_source_color(analysis)
         text = self.result["text"]
         expected = f"{text['title']}. {text['description']}"
         source = await self.files.source_photo(analysis["print_source"])
@@ -64,7 +66,8 @@ class RedrawPipeline:
         if not self.result.get("analysis"):
             photos = [await self.files.source_photo(i) for i in range(len(self.result["source_photos"]))]
             async with self.studio.photo_slots:
-                analysis = await self.generator.analyze_gallery(photos, self.job.payload["theme"])
+                title = self.job.payload["source"].get("title", "")
+                analysis = await self.generator.analyze_gallery(photos, self.job.payload["theme"], title)
             self.result["analysis"] = analysis
             self.result["text"] = analysis["text"]
             self.files.save("gallery_analyzed", self.result)
@@ -75,6 +78,15 @@ class RedrawPipeline:
             self.files.save("source_rejected", self.result)
             raise PermanentError("Исходная карточка отклонена фильтром: " + "; ".join(verdict.get("reasons", [])))
         return analysis
+
+    def use_source_color(self, analysis: dict) -> None:
+        """One card per print: the seller's shirt color, so the print is shown on the fabric it was made for."""
+        color = analysis.get("shirt_color")
+        if color in self.config["colors"]:
+            self.config["colors"] = [color]
+            # The print goes on the fabric it was made for, so its ink never needs a color version.
+            self.source_color = True
+        self.result["colors"] = self.config["colors"]
 
     async def extract_prints(self, source: bytes, expected: str) -> None:
         """Candidates live under candidates/<key>.png; accepted ones become prints/<color>.png."""
@@ -113,7 +125,7 @@ class RedrawPipeline:
 
             async def recolor(color: str, base: bytes) -> None:
                 pending = color in candidates and checks.get(color, {}).get("accepted") is not False
-                if color in variants or pending or not vanishing_ink(base, color):
+                if self.source_color or color in variants or pending or not vanishing_ink(base, color):
                     return
                 feedback = str(checks.pop(color, {}).get("reason", ""))
                 async with self.studio.photo_slots:

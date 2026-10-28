@@ -9,3 +9,7 @@ printflow/data
 printflow/tests
 printflow/products/*/assets/templates
 **/__pycache__
+
+# Runtime data of local and docker runs, never part of the image
+printflow/data*/
+outputs/

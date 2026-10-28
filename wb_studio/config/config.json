@@ -140,7 +140,10 @@
   "kiz_marked": false,
   "image_model": "gpt-image-2.5-sunburst",
   "image_size": "1200x1600",
-  "image_quality": "high",
+  "image_quality": "medium",
+  "photo_quality": "low",
+  "reasoning_effort": "low",
+  "extract_quality": "medium",
   "name_model": "gpt-4.1-mini",
   "information": {
     "composition": "100% ХЛОПОК",

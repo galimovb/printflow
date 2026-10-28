@@ -138,19 +138,20 @@ async def open_session(playwright, env):
             Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
             / "Google/Chrome/Application/chrome.exe",
             Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+            Path("/usr/bin/google-chrome"),
+            Path("/usr/bin/google-chrome-stable"),
         ]
     )
     executable = next((p for p in candidates if p.is_file()), None)
-    if executable is None:
-        raise PermanentError(
-            "Google Chrome не найден. Установите его или задайте PRINTFLOW_WB_BROWSER_EXECUTABLE — полный путь к chrome.exe."
-        )
+    if executable is None and configured:
+        raise PermanentError(f"PRINTFLOW_WB_BROWSER_EXECUTABLE не найден: {configured}")
+    # Without Google Chrome (e.g. the Linux image) the Chromium bundled with Playwright is used.
+    launch = {"executable_path": str(executable)} if executable else {}
     try:
-        context = await playwright.chromium.launch_persistent_context(executable_path=str(executable), **options)
+        context = await playwright.chromium.launch_persistent_context(**launch, **options)
     except Exception as exc:
         raise PermanentError(
-            "Не удалось открыть Google Chrome с профилем WB. Закройте процессы с этим профилем и повторите. "
-            + str(exc)[:250]
+            "Не удалось открыть браузер с профилем WB. Закройте процессы с этим профилем и повторите. " + str(exc)[:250]
         ) from exc
     context.set_default_timeout(90000)
     context.set_default_navigation_timeout(90000)

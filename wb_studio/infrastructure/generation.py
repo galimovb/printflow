@@ -62,18 +62,30 @@ def on_gray(raw: bytes) -> bytes:
     return jpeg(background)
 
 
-def on_chromakey(raw: bytes) -> bytes:
+def on_canvas(raw: bytes, ratio: float) -> bytes:
+    """Print centered on a chromakey canvas of the output aspect, so the model has no reason to extend it."""
     image = Image.open(io.BytesIO(raw)).convert("RGBA")
-    keyed = Image.new("RGBA", image.size, "#90EE90")
-    keyed.alpha_composite(image)
-    return png(keyed.convert("RGB"))
+    width = max(image.width, round(image.height * ratio)) + image.width // 5
+    height = round(width / ratio)
+    canvas = Image.new("RGBA", (width, height), "#90EE90")
+    canvas.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
+    return png(canvas.convert("RGB"))
 
 
-def blurred(raw: bytes) -> bytes:
+def blurred(raw: bytes, side: int = 1200) -> bytes:
     """Pose stays readable, the seller's print and its placement do not."""
     image = Image.open(io.BytesIO(raw)).convert("RGB")
-    image.thumbnail((900, 1200))
+    image.thumbnail((side * 3 // 4, side))
     return png(image.filter(ImageFilter.GaussianBlur(max(6, image.width // 60))))
+
+
+def shrunk(raw: bytes, side: int) -> bytes:
+    """Input images are billed by size; model photos need only the layout, not the full resolution."""
+    image = Image.open(io.BytesIO(raw))
+    if max(image.size) <= side:
+        return raw
+    image.thumbnail((side, side), Image.Resampling.LANCZOS)
+    return png(image)
 
 
 def photo_index(value) -> int | None:
@@ -89,6 +101,20 @@ def photo_index(value) -> int | None:
 class Generator:
     def __init__(self, env: dict, config: dict):
         self.config = config
+        # Env values override the config frozen in a job, so they also reach cards already queued.
+        self.image_quality = env.get("PRINTFLOW_WB_IMAGE_QUALITY") or config["image_quality"]
+        self.photo_quality = env.get("PRINTFLOW_WB_PHOTO_QUALITY") or config.get("photo_quality") or self.image_quality
+        self.extract_quality = (
+            env.get("PRINTFLOW_WB_EXTRACT_QUALITY") or config.get("extract_quality") or self.image_quality
+        )
+        self.reasoning_effort = env.get("PRINTFLOW_WB_REASONING_EFFORT") or config.get("reasoning_effort")
+        # Longest side of the reference images sent with each model photo.
+        self.photo_input_side = int(env.get("PRINTFLOW_WB_PHOTO_INPUT_SIDE") or config.get("photo_input_side", 768))
+        # One model for gallery analysis and print checks; the env value also reaches cards already queued.
+        self.analysis_model = env.get("PRINTFLOW_WB_ANALYSIS_MODEL") or config.get(
+            "analysis_model", config["name_model"]
+        )
+        self.vision_model = env.get("PRINTFLOW_WB_ANALYSIS_MODEL") or config.get("vision_model", config["name_model"])
         self.key = env.get("OPENAI_API_KEY", "")
         self.base = env.get("OPENAI_BASE_URL") or None
 
@@ -100,7 +126,9 @@ class Generator:
     # --- transport ------------------------------------------------------------
 
     @generation_errors
-    async def edit(self, files: list[tuple], prompt: str, *, request_timeout: float | None = None) -> bytes:
+    async def edit(
+        self, files: list[tuple], prompt: str, *, request_timeout: float | None = None, quality: str | None = None
+    ) -> bytes:
         client = self.client()
         if request_timeout is not None:
             client = client.with_options(timeout=request_timeout, max_retries=0)
@@ -110,7 +138,7 @@ class Generator:
                 image=files,
                 prompt=prompt,
                 size=self.config["image_size"],
-                quality=self.config["image_quality"],
+                quality=quality or self.image_quality,
             )
         if not response.data or not response.data[0].b64_json:
             raise RuntimeError("Image generation returned no image")
@@ -124,6 +152,8 @@ class Generator:
         async with client:
             # Reasoning models reject a fixed temperature; the rest answer deterministically with 0.
             options = {} if model.startswith(REASONING_MODELS) else {"temperature": 0}
+            if model.startswith(REASONING_MODELS) and self.reasoning_effort:
+                options["reasoning_effort"] = self.reasoning_effort
             response = await client.chat.completions.create(
                 model=model,
                 response_format={"type": "json_object"},
@@ -135,9 +165,9 @@ class Generator:
     async def judge(self, prompt: str, images: list[bytes]) -> dict:
         content = [{"type": "text", "text": prompt}]
         content += [
-            {"type": "image_url", "image_url": {"url": data_url(on_gray(raw)), "detail": "high"}} for raw in images
+            {"type": "image_url", "image_url": {"url": data_url(on_gray(raw)), "detail": "low"}} for raw in images
         ]
-        model = self.config.get("vision_model", self.config["name_model"])
+        model = self.vision_model
         return await self.chat_json(content, model=model)
 
     def listing_text(self, title: str, description: str, limit: int) -> dict:
@@ -150,16 +180,14 @@ class Generator:
 
     # --- source_redraw ----------------------------------------------------------
 
-    async def analyze_gallery(self, photos: list[bytes], theme: str) -> dict:
-        content = [{"type": "text", "text": prompts.gallery_analysis_prompt(theme)}]
+    async def analyze_gallery(self, photos: list[bytes], theme: str, source_title: str = "") -> dict:
+        content = [{"type": "text", "text": prompts.gallery_analysis_prompt(theme, source_title)}]
         for index, raw in enumerate(photos):
             content += [
                 {"type": "text", "text": f"PHOTO INDEX {index}"},
-                {"type": "image_url", "image_url": {"url": data_url(numbered_photo(raw, index))}},
+                {"type": "image_url", "image_url": {"url": data_url(numbered_photo(raw, index)), "detail": "low"}},
             ]
-        data = await self.chat_json(
-            content, model=self.config.get("analysis_model", self.config["name_model"]), retries=False
-        )
+        data = await self.chat_json(content, model=self.analysis_model, retries=False)
         roles = data.get("photos")
         if not isinstance(roles, list):
             raise RuntimeError("Missing gallery photo classifications")
@@ -173,6 +201,7 @@ class Generator:
         data["print_source"] = photo_index(data.get("print_source"))
         assessment = assess(data, len(photos), self.config.get("max_print_width", 0.9))
         audience = data.get("audience") if data.get("audience") in ("female", "male") else "unisex"
+        shirt_color = data.get("shirt_color") if data.get("shirt_color") in ("white", "black") else "white"
         return {
             "selected": assessment["selected"],
             "print_source": assessment["print_source"],
@@ -180,16 +209,23 @@ class Generator:
             "accepted": assessment["accepted"],
             "filter": assessment,
             "audience": audience,
+            "shirt_color": shirt_color,
             "text": self.listing_text(data["title"], data["description"][:400], 1500),
         }
 
     async def extract_print(self, source: bytes, expected_print: str = "", feedback: str = "") -> bytes:
         prompt = prompts.extract_print_prompt(expected_print, feedback)
-        return finalize_print(await self.edit([("source-photo.png", source, "image/png")], prompt))
+        files = [("source-photo.png", source, "image/png")]
+        return finalize_print(await self.edit(files, prompt, quality=self.extract_quality))
 
     async def recolor_print(self, art: bytes, color: str, feedback: str = "") -> bytes:
-        prompt = prompts.recolor_print_prompt(color, feedback)
-        return finalize_print(await self.edit([("artwork.png", on_chromakey(art), "image/png")], prompt))
+        image = Image.open(io.BytesIO(art))
+        box = image.getchannel("A").getbbox() if image.mode == "RGBA" else None
+        width, height = (box[2] - box[0], box[3] - box[1]) if box else image.size
+        prompt = prompts.recolor_print_prompt(color, feedback, width / height)
+        out_width, out_height = (int(x) for x in self.config["image_size"].split("x"))
+        files = [("artwork.png", on_canvas(art, out_width / out_height), "image/png")]
+        return finalize_print(await self.edit(files, prompt))
 
     async def verify_prints(self, source: bytes, prints: dict[str, bytes], expected_print: str = "") -> dict:
         keys = list(prints)
@@ -209,10 +245,15 @@ class Generator:
         pose: bytes | None = None,
         geometry: dict | None = None,
     ) -> bytes:
-        files = [("main-product.png", product, "image/png"), ("artwork.png", art, "image/png")]
+        side = self.photo_input_side
+        files = [
+            ("main-product.png", shrunk(product, side), "image/png"),
+            ("artwork.png", shrunk(art, side), "image/png"),
+        ]
         if pose:
-            files.append(("pose-reference.png", blurred(pose), "image/png"))
-        return await self.edit(files, prompts.live_photo_prompt(color, index, audience, bool(pose), geometry))
+            files.append(("pose-reference.png", blurred(pose, side * 2 // 3), "image/png"))
+        prompt = prompts.live_photo_prompt(color, index, audience, bool(pose), geometry)
+        return await self.edit(files, prompt, quality=self.photo_quality)
 
     # --- standard -------------------------------------------------------------
 
@@ -229,7 +270,7 @@ class Generator:
         background.alpha_composite(image)
         content = [
             {"type": "text", "text": prompts.describe_prompt(theme)},
-            {"type": "image_url", "image_url": {"url": data_url(jpeg(background, 75)), "detail": "high"}},
+            {"type": "image_url", "image_url": {"url": data_url(jpeg(background, 75)), "detail": "low"}},
         ]
         result = await self.chat_json(content, model=self.config["name_model"])
         if not isinstance(result.get("title"), str) or not isinstance(result.get("description"), str):
@@ -252,4 +293,4 @@ class Generator:
         files = [("main-product.png", product, "image/png"), ("artwork.png", art, "image/png")]
         if white_scene:
             files.append(("same-scene-white-shirt.png", white_scene, "image/png"))
-        return await self.edit(files, prompt, request_timeout=180)
+        return await self.edit(files, prompt, request_timeout=180, quality=self.photo_quality)
