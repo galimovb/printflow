@@ -16,10 +16,11 @@ from printflow.wb_studio.application.studio import Studio
 from printflow.wb_studio.config import load_config
 from printflow.wb_studio.domain import prompts
 from printflow.wb_studio.infrastructure.generation import Generator
+from printflow.wb_studio.infrastructure.wb.payloads import clean_text
 from printflow.wb_studio.infrastructure.wb.publisher import Publisher
 from printflow.wb_studio.infrastructure.wb.search import normalize_cards
 
-GENERATOR = "printflow.wb_studio.application.studio.Generator"
+GENERATOR = "printflow.wb_studio.application.cards.Generator"
 
 
 def image():
@@ -280,7 +281,7 @@ class DiscoveryTest(unittest.TestCase):
 
     def test_parser_catalog_envelopes_and_persistent_profile(self):
         from printflow.wb_studio.infrastructure.wb.catalog import catalog_cards
-        from printflow.wb_studio.infrastructure.wb.search import browser_options
+        from printflow.wb_studio.infrastructure.wb.browser import browser_options
 
         products = [
             {"id": 155420906, "subjectId": 192, "name": "Футболка", "supplierId": 123},
@@ -310,7 +311,7 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual([x["rank"] for x in result], [1, 2])
 
     def test_delayed_wb_challenge_is_not_empty_search(self):
-        from printflow.wb_studio.infrastructure.wb.search import access_is_pending, wait_for_access
+        from printflow.wb_studio.infrastructure.wb.browser import access_is_pending, wait_for_access
 
         self.assertTrue(access_is_pending("", "...", 498))
         self.assertTrue(access_is_pending("Подозрительная активность. Новая попытка через 00:46"))
@@ -330,7 +331,7 @@ class DiscoveryTest(unittest.TestCase):
                 return "Каталог"
 
         async def run():
-            with patch("printflow.wb_studio.infrastructure.wb.search.asyncio.sleep", new_callable=AsyncMock):
+            with patch("printflow.wb_studio.infrastructure.wb.browser.asyncio.sleep", new_callable=AsyncMock):
                 await wait_for_access(Page(["Подозрительная активность", "Товары", "Товары"]), False, seconds=4)
                 with self.assertRaisesRegex(PermanentError, "ограничение доступа"):
                     await wait_for_access(Page(["Подозрительная активность"] * 3), False, seconds=4)
@@ -386,6 +387,48 @@ class PublicationTest(unittest.TestCase):
             media = next(body for path, body in calls if path.endswith("/media/save"))
             self.assertEqual(media["data"], draft["images"]["white"])
             self.assertFalse(any("/update" in path for path, _ in calls))
+
+        asyncio.run(run())
+
+    def test_text_drops_symbols_that_wb_rejects(self):
+        self.assertEqual(clean_text("Принт I ♥ NY ❤️ и 🔥 «Мама»"), "Принт I NY и «Мама»")
+
+    def test_rejected_upload_stops_with_the_wb_reason(self):
+        async def run():
+            config = load_config()
+            config.update(
+                price=1200,
+                characteristics=[{"id": 1, "value": ["test"]}],
+                sizes=[{"techSize": "L", "wbSize": "50"}],
+                dimensions={"length": 30, "width": 25, "height": 2, "weightBrutto": 0.2},
+            )
+            draft = {
+                "config": config,
+                "text": {"title": "Футболка", "description": "Принт"},
+                "images": {"white": ["https://s3/1.jpg"]},
+                "vendor_codes": {"white": "TEE-000000001-100W"},
+            }
+            old = {"updatedAt": "2000-01-01T00:00:00Z", "errors": {"TEE-000000001-100W": ["старая ошибка"]}}
+            fresh = {"updatedAt": "2999-01-01T00:00:00Z", "errors": {"TEE-000000001-100W": ["Поле Описание не должно содержать запрещенные символы: ♥"]}}
+            items = [old]
+
+            async def request(path, body):
+                if path.endswith("/error/list"):
+                    return {"data": {"items": items, "cursor": {"next": False}}}
+                if path.endswith("/cards/list"):
+                    return {"cards": []}
+                if path.endswith("/barcodes"):
+                    return {"data": ["barcode"]}
+                return {"error": False}
+
+            publisher = Publisher("test", request)
+            with patch("printflow.wb_studio.infrastructure.wb.publisher.asyncio.sleep", return_value=None):
+                # An error from an earlier upload of the same code does not stop a fresh one.
+                with self.assertRaises(RetryLater):
+                    await publisher.publish(draft, {}, lambda value: None)
+                items.insert(0, fresh)
+                with self.assertRaisesRegex(PermanentError, "запрещенные символы"):
+                    await publisher.publish(draft, {}, lambda value: None)
 
         asyncio.run(run())
 

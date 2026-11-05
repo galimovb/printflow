@@ -11,11 +11,13 @@ from pathlib import Path
 
 from PIL import Image
 
+from printflow.config import S3Settings
 from printflow.domain.models import JobKind, JobStatus
 from printflow.migrations.runner import migrate
 from printflow.repositories.jobs import JobRepository
 from printflow.wb_studio.application.studio import Studio
 from printflow.wb_studio.domain.models import PRODUCT
+from printflow.wb_studio.infrastructure.template_library import TemplateLibrary
 
 
 class LocalStorage:
@@ -49,6 +51,20 @@ class LocalStorage:
         return len(keys)
 
 
+def template_storage(env):
+    from printflow.services.storage.s3 import Storage
+
+    return Storage(
+        S3Settings(
+            endpoint=env.get("S3_ENDPOINT_URL", ""),
+            region=env.get("S3_REGION", ""),
+            access_key=env["S3_ACCESS_KEY"],
+            secret_key=env["S3_SECRET_KEY"],
+            public_base=env.get("S3_PUBLIC_BASE_URL", "").rstrip("/"),
+        )
+    )
+
+
 async def generate(body, output, env, *, generator=None, search=None, fetch=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -56,6 +72,9 @@ async def generate(body, output, env, *, generator=None, search=None, fetch=None
     repo = JobRepository(output / "jobs.db", timeout_sec=30)
     storage = LocalStorage(output / "files")
     options = {"generator": generator, "fetch": fetch}
+    if env.get("S3_ACCESS_KEY") and env.get("S3_SECRET_KEY"):
+        # Results stay in the folder, but the mockup templates are only in their S3 buckets.
+        options["templates"] = TemplateLibrary.from_env(template_storage(env), env)
     if search:
         options["search"] = search
     studio = Studio(repo, storage, env, **options)

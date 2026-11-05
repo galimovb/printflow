@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -16,6 +17,8 @@ from typing import Any, Iterator
 
 from printflow.domain.models import Job, JobStatus
 from printflow.migrations.runner import design_counter, ensure_current
+
+JOURNAL_MODE = {"WAL": "WAL", "DELETE": "DELETE"}.get(os.environ.get("PRINTFLOW_SQLITE_JOURNAL", "WAL").upper(), "WAL")
 
 
 def _now() -> datetime:
@@ -39,7 +42,9 @@ class JobRepository:
     def _conn(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=self.timeout_sec, isolation_level=None)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
+        # WAL needs shared memory between processes, which a Docker Desktop folder mount on Windows does not
+        # provide reliably ("disk I/O error"); PRINTFLOW_SQLITE_JOURNAL=DELETE switches to a plain rollback journal.
+        db.execute(f"PRAGMA journal_mode={JOURNAL_MODE}")
         try:
             yield db
         finally:

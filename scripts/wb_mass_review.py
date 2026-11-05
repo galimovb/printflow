@@ -12,7 +12,7 @@ from printflow.repositories.jobs import JobRepository
 from printflow.wb_studio.infrastructure.generation import Generator
 from printflow.wb_studio.infrastructure.local import generate,LocalStorage
 from printflow.scripts.wb_review_batch import read,write,report
-from printflow.wb_studio.infrastructure.wb.search import parsing_batch
+from printflow.wb_studio.infrastructure.wb.browser import parsing_batch
 
 
 @parsing_batch
@@ -60,7 +60,7 @@ async def main(args):
     from printflow.wb_studio.application.studio import Studio
     downloader=Studio(SimpleNamespace(list=lambda **kw:[]),LocalStorage(out/'files'),env)
     async def fetch(url):
-        return cached[url].read_bytes() if url in cached else await downloader.fetch_photo(url)
+        return cached[url].read_bytes() if url in cached else await downloader.cards.fetch_photo(url)
     if args.sources_from:
         candidates=replay
     elif not args.fresh:

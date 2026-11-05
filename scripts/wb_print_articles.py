@@ -10,7 +10,7 @@ async def main():
  async def one(job):
   async with semaphore:
    def save(stage,result):repo.save_progress(job.id,stage=stage,result=result)
-   aliases=await studio.save_article_prints(job,job.result,save)
+   aliases=await studio.cards.save_article_prints(job,job.result,save)
    repo.save_progress(job.id,stage=job.stage,result=job.result)
    results.append({'job':job.id,'vendor_codes':job.result['vendor_codes'],'article_prints':aliases})
    print(job.id[:8],job.result['vendor_codes'],flush=True)

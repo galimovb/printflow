@@ -3,14 +3,17 @@
 1. Download up to 20 gallery photos.
 2. One request analyses the gallery: theme, single front print, width, audience,
    up to four model photos, listing text. Rejected products stop here.
-3. The print is extracted once. A color version redraws that clean file only when
-   its ink would vanish on the fabric. One shared check, one retry per file.
+3. The print is extracted once. A color version comes only when the gallery analysis picks a recolor
+   action for that fabric: lettering and outlines are redrawn on the clean file, a flat logo takes the
+   contrast ink by pixels, a picture with shading is cut out of the seller photo again for that fabric.
+   One shared check, one retry per file.
 4. Four model photos, all in parallel, only in the seller's shirt color. A frame with its own
    seller photo copies that pose; the rest use fixed scenes. Frames 5-6 are prebuilt slides.
 """
 
 from printflow.domain.errors import PermanentError
-from printflow.wb_studio.domain.print_contrast import vanishing_ink
+from printflow.wb_studio.domain.print_tone import invert_flat
+from printflow.wb_studio.domain.prompts import SCENE_KEYS
 from printflow.wb_studio.infrastructure.rendering.info_slides import info_slide
 from printflow.wb_studio.infrastructure.rendering.straight_reference import prepare_straight_reference
 
@@ -22,14 +25,13 @@ MAX_PRINT_ATTEMPTS = 2
 
 
 class RedrawPipeline:
-    def __init__(self, studio, job, generator, files: CardFiles):
-        self.studio = studio
+    def __init__(self, cards, job, generator, files: CardFiles):
+        self.cards = cards
         self.job = job
         self.config = dict(job.payload["config"])
         self.generator = generator
         self.files = files
         self.result = files.result
-        self.source_color = False
 
     async def run(self) -> None:
         await self.download_gallery()
@@ -37,13 +39,15 @@ class RedrawPipeline:
         self.use_source_color(analysis)
         text = self.result["text"]
         expected = f"{text['title']}. {text['description']}"
-        source = await self.files.source_photo(analysis["print_source"])
-        await self.extract_prints(source, expected)
+        # A resumed card with its prints done never touches the seller photos: they may be gone already.
+        if not all(color in self.result.get("print_variants", {}) for color in self.config["colors"]):
+            source = await self.files.source_photo(analysis["print_source"])
+            await self.extract_prints(source, expected)
         if not self.result.get("print"):
             first = await self.files.get("prints", f"prints/{self.config['colors'][0]}.png")
             self.result["print"] = await self.files.put("prints", "print.png", first)
             self.files.save("print_ready", self.result)
-        await self.studio.save_article_prints(self.job, self.result, self.files)
+        await self.cards.save_article_prints(self.job, self.result, self.files)
         await self.gallery(analysis)
 
     async def download_gallery(self) -> None:
@@ -55,7 +59,7 @@ class RedrawPipeline:
         async def download(index: int, url: str) -> None:
             if str(index) in archived:
                 return
-            raw = to_png(await self.studio.fetch_photo(url))
+            raw = to_png(await self.cards.fetch_photo(url))
             archived[str(index)] = await self.files.put("temporary", f"sources/{index + 1:02}.png", raw)
             self.files.save(f"source_saved:{index + 1}", self.result)
 
@@ -65,7 +69,7 @@ class RedrawPipeline:
     async def analyze(self) -> dict:
         if not self.result.get("analysis"):
             photos = [await self.files.source_photo(i) for i in range(len(self.result["source_photos"]))]
-            async with self.studio.photo_slots:
+            async with self.cards.photo_slots:
                 title = self.job.payload["source"].get("title", "")
                 analysis = await self.generator.analyze_gallery(photos, self.job.payload["theme"], title)
             self.result["analysis"] = analysis
@@ -84,8 +88,6 @@ class RedrawPipeline:
         color = analysis.get("shirt_color")
         if color in self.config["colors"]:
             self.config["colors"] = [color]
-            # The print goes on the fabric it was made for, so its ink never needs a color version.
-            self.source_color = True
         self.result["colors"] = self.config["colors"]
 
     async def extract_prints(self, source: bytes, expected: str) -> None:
@@ -96,6 +98,8 @@ class RedrawPipeline:
         checks = result.setdefault("print_checks", {})
         candidates = result.setdefault("print_candidates", {})
         attempts = result.setdefault("print_attempts", {})
+        # The gallery analysis picks one fixed recolor action per color, so the print keeps its meaning.
+        changes = (result.get("analysis") or {}).get("recolor") or {}
 
         async def put_candidate(key: str, raw: bytes) -> None:
             candidates[key] = await self.files.put("temporary", f"candidates/{key}.png", raw)
@@ -111,7 +115,7 @@ class RedrawPipeline:
                     )
             if "base" not in candidates or checks.get("base", {}).get("accepted") is False:
                 feedback = str(checks.pop("base", {}).get("reason", ""))
-                async with self.studio.photo_slots:
+                async with self.cards.photo_slots:
                     raw = await self.generator.extract_print(source, expected, feedback)
                 attempts["base"] = attempts.get("base", 0) + 1
                 await put_candidate("base", raw)
@@ -125,11 +129,18 @@ class RedrawPipeline:
 
             async def recolor(color: str, base: bytes) -> None:
                 pending = color in candidates and checks.get(color, {}).get("accepted") is not False
-                if self.source_color or color in variants or pending or not vanishing_ink(base, color):
+                if changes.get(color, "none") == "none" or color in variants or pending:
                     return
                 feedback = str(checks.pop(color, {}).get("reason", ""))
-                async with self.studio.photo_slots:
-                    raw = await self.generator.recolor_print(base, color, feedback)
+                action = changes[color]
+                if action == "invert_flat":
+                    raw = invert_flat(base, color)  # a flat logo only changes its ink: exact and free
+                else:
+                    async with self.cards.photo_slots:
+                        if action == "tone":  # a recolor turns a picture negative: cut it out for this fabric
+                            raw = await self.generator.tone_print(source, color, expected, feedback)
+                        else:
+                            raw = await self.generator.recolor_print(base, color, action, feedback)
                 attempts[color] = attempts.get(color, 0) + 1
                 await put_candidate(color, raw)
                 self.files.save(f"print_recolored:{color}", result)
@@ -140,8 +151,8 @@ class RedrawPipeline:
                 if color in candidates and color not in checks:
                     unchecked[color] = await candidate(color)
             if unchecked:
-                async with self.studio.photo_slots:
-                    checks.update(await self.generator.verify_prints(source, unchecked, expected))
+                async with self.cards.photo_slots:
+                    checks.update(await self.generator.verify_prints(source, unchecked, expected, changes))
             if checks.get("base", {}).get("accepted") is True:
                 for color in colors:
                     if color in variants:
@@ -160,7 +171,9 @@ class RedrawPipeline:
         colors = self.config["colors"]
         audience = analysis.get("audience", "unisex")
         own = analysis.get("filter", {}).get("original_selected", [])[:MODEL_FRAMES]
-        poses = [await self.files.source_photo(i) for i in own]
+        # Seller poses are read only for frames still to draw; finished frames never need the seller photos.
+        missing = [i for i in range(len(own)) if not all(self.files.has_frame(c, i) for c in colors)]
+        poses = [await self.files.source_photo(own[i]) if i in missing else b"" for i in range(len(own))]
         arts = {color: await self.files.get("prints", f"prints/{color}.png") for color in colors}
         references = {color: prepare_straight_reference(arts[color], color, self.config) for color in colors}
 
@@ -171,11 +184,33 @@ class RedrawPipeline:
                 await self.files.store_frame(color, index, info_slide(index, color, self.config))
                 return
             pose = poses[index] if index < len(poses) else None
+            # Frames without a seller pose take the fixed scenes the analysis ranked most complementary;
+            # the first frame is the main WB photo, so without a seller pose it is always the catalog shot.
+            order = list(analysis.get("scene_order") or SCENE_KEYS)
+            if not poses:
+                order = ["catalog"] + [key for key in order if key != "catalog"]
+            scene = None if pose else SCENE_KEYS.index(order[(index - len(poses)) % len(order)])
             product, geometry = references[color]
-            async with self.studio.photo_slots:
-                raw = await self.studio.with_photo_timeout(
-                    self.generator.live_photo(product, arts[color], color, index, audience, pose, geometry)
+            person = self.person(index, audience)
+            async with self.cards.photo_slots:
+                raw = await self.cards.with_photo_timeout(
+                    self.generator.live_photo(
+                        product,
+                        arts[color],
+                        color,
+                        index,
+                        person.gender if person else audience,
+                        pose,
+                        geometry,
+                        self.job.design_number or 0,
+                        scene,
+                        person=person.photo if person else None,
+                    )
                 )
             await self.files.store_frame(color, index, raw)
 
         await gather_all(frame(color, i) for color in colors for i in range(self.config["photos_per_color"]))
+
+    def person(self, index: int, audience: str):
+        """The person of a model frame is drawn from the prompt; model_reference hands over a ready model."""
+        return None

@@ -1,7 +1,7 @@
 """Open the persistent Google Chrome profile for manual WB session setup."""
 import asyncio
 from printflow.config import read_env
-from printflow.wb_studio.infrastructure.wb.search import open_session,browser_options
+from printflow.wb_studio.infrastructure.wb.browser import open_session,browser_options
 
 
 async def run():

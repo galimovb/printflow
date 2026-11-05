@@ -5,7 +5,7 @@ A job stores its full config at creation, so later edits never change running jo
 
 import json
 
-from printflow.wb_studio.domain.models import COLORS
+from printflow.wb_studio.domain.models import COLORS, REDRAW_ALGORITHMS
 from printflow.wb_studio.paths import CONFIG_DIR
 
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -30,7 +30,7 @@ def build_config(colors, algorithm: str, group_size: int) -> dict:
     if not config["colors"]:
         raise ValueError("Нужен хотя бы один цвет футболки")
     config["algorithm"] = algorithm
-    if algorithm == "source_redraw":
+    if algorithm in REDRAW_ALGORITHMS:
         config.update(SOURCE_REDRAW)
     config["merge_designs"] = group_size
     return config

@@ -82,7 +82,8 @@ class CardFiles:
         name = f"{color}/{index + 1:02}"
         await self.put("mockups", f"{name}.png", raw)
         out = io.BytesIO()
-        ImageOps.fit(image, GALLERY_SIZE).save(out, format="JPEG", quality=95)
+        # Taller frames (2:3 mockup templates) lose more at the feet than above the head.
+        ImageOps.fit(image, GALLERY_SIZE, centering=(0.5, 0.3)).save(out, format="JPEG", quality=95)
         slots = self.result.setdefault("photo_checkpoints", {}).setdefault(color, {})
         slots[str(index)] = await self.put("mockups", f"{name}.jpg", out.getvalue(), "image/jpeg")
         ordered = []

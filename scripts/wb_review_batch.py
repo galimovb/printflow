@@ -17,7 +17,7 @@ from printflow.domain.models import Job, JobStatus
 from printflow.repositories.jobs import JobRepository
 from printflow.wb_studio.infrastructure.local import LocalStorage
 from printflow.wb_studio.application.studio import Studio
-from printflow.wb_studio.infrastructure.wb.search import parsing_batch
+from printflow.wb_studio.infrastructure.wb.browser import parsing_batch
 
 
 def read(path):

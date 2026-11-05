@@ -9,14 +9,14 @@ from pydantic import BaseModel, Field, HttpUrl
 from printflow.api.schemas import JobView
 from printflow.config import read_env
 from printflow.domain.errors import PermanentError
-from printflow.domain.models import JobKind, JobStatus
+from printflow.domain.models import JobStatus
 from printflow.wb_studio.config import default_colors
 from printflow.wb_studio.domain.models import PRODUCT
 from printflow.wb_studio.paths import CONFIG_DIR
 
 
 class Campaign(BaseModel):
-    algorithm: Literal["standard", "source_redraw"] = "standard"
+    algorithm: Literal["standard", "source_redraw", "model_reference", "template_mockup"] = "standard"
     design_limit: int | None = Field(default=None, ge=1, le=20)
     themes: list[str] = Field(min_length=1, max_length=200)
     limit: int = Field(default=10, ge=10, le=20)
@@ -35,7 +35,7 @@ class Source(BaseModel):
 
 
 class SourceBatch(BaseModel):
-    algorithm: Literal["standard", "source_redraw"] = "standard"
+    algorithm: Literal["standard", "source_redraw", "model_reference", "template_mockup"] = "standard"
     theme: str = Field(min_length=2, max_length=500)
     sources: list[Source] = Field(min_length=1, max_length=60)
     # Cards to generate; the remaining sources are a reserve that replaces rejected prints.
@@ -48,7 +48,7 @@ class SourceBatch(BaseModel):
 class UrlBatch(BaseModel):
     urls: list[HttpUrl] = Field(min_length=1, max_length=20)
     theme: str = "Футболки по ссылкам"
-    algorithm: Literal["standard", "source_redraw"] = "source_redraw"
+    algorithm: Literal["standard", "source_redraw", "model_reference", "template_mockup"] = "source_redraw"
     colors: list[Literal["white", "black"]] = Field(
         default_factory=lambda: default_colors(read_env()), min_length=1, max_length=2
     )
@@ -76,9 +76,6 @@ def router(container):
 
     @secure.post("/sources")
     def import_sources(body: SourceBatch):
-        import hashlib
-        import json
-
         from printflow.wb_studio.infrastructure.wb.search import normalize_cards
 
         raw = [
@@ -94,18 +91,7 @@ def router(container):
         sources = normalize_cards(raw, len(raw))
         if len(sources) != len(raw):
             raise HTTPException(422, "Нужны уникальные ссылки карточек WB и HTTPS фотографии")
-        config = container.wb_studio.configuration(body.colors, body.algorithm)
-        payload = {
-            "kind": JobKind.WB_DISCOVER.value,
-            "theme": body.theme,
-            "limit": len(sources),
-            "config": config,
-            "design_limit": body.design_limit,
-            # In the payload, not saved afterwards: a worker may claim the job the moment it exists.
-            "sources": sources,
-        }
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
-        job, created = container.job_repository.create(payload, product=PRODUCT, external_id="wb-sources:" + digest)
+        job, created = container.wb_studio.sources(body.theme, sources, body.colors, body.algorithm, body.design_limit)
         return {"id": job.id, "created": created}
 
     @secure.post("/urls")

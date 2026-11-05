@@ -1,8 +1,8 @@
 import copy,unittest
 from printflow.wb_studio.domain.source_filter import assess
 class SourceFilterTest(unittest.TestCase):
- def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'front_print':True,'print_width':.55,'reaches_edges':False,'print_source':0,'selected':[0,1,2,3],
-  'photos':[{'index':i,'role':'front','same_print':True,'normal_light':True,'adult':True} for i in range(4)]}
+ def data(self):return {'theme_match':True,'single_print':True,'print_count':1,'front_print':True,'print_width':.55,'reaches_edges':False,'small_print':False,'print_source':0,'selected':[0,1,2,3],
+  'photos':[{'index':i,'role':'front','same_print':True,'whole_print':True,'normal_light':True,'adult':True} for i in range(4)]}
  def test_accepts_four_matching_fronts(self):self.assertTrue(assess(self.data(),4)['accepted'])
  def test_rejects_wrong_or_unknown_theme(self):
   for value in (False,None):
@@ -18,6 +18,15 @@ class SourceFilterTest(unittest.TestCase):
  def test_ineligible_print_source_falls_back_to_best_eligible(self):
   d=self.data();d['photos'][0]['adult']=False;d['print_source']=0;r=assess(d,4);self.assertTrue(r['accepted']);self.assertEqual(r['print_source'],1)
  def test_every_photo_must_be_classified(self):self.assertFalse(assess(self.data(),5)['accepted'])
+ def test_a_print_cut_by_the_photo_is_never_the_source(self):
+  d=self.data();d['print_source']=2;d['photos'][2]['whole_print']=False;d['selected']=[2];r=assess(d,4)
+  self.assertTrue(r['accepted']);self.assertEqual(r['print_source'],0)
+  for p in d['photos']:p['role']='detail';p['adult']=False
+  d['photos'][0]['whole_print']=False;r=assess(d,4);self.assertEqual(r['print_source'],1)
+  d['photos'][0].update(whole_print=True,role='infographic');d['photos'][1]['whole_print']=False
+  self.assertEqual(assess(d,4)['print_source'],0)  # a seller banner around the whole shirt
+  for p in d['photos']:p['whole_print']=False
+  self.assertFalse(assess(d,4)['accepted'])
 
  def test_rejects_two_separate_prints(self):
   d=self.data();d.update(single_print=False,print_count=2);self.assertFalse(assess(d,4)['accepted'])
@@ -53,6 +62,26 @@ class EdgeAndWidthTest(unittest.TestCase):
             self.assertFalse(assess(d, 4)["accepted"])
 
 
+class SmallPrintTest(unittest.TestCase):
+    def data(self):
+        return SourceFilterTest.data(None)
+
+    def test_pocket_or_collar_marks_and_unconfirmed_size_reject(self):
+        for value in (True, None):
+            d = self.data()
+            d["small_print"] = value
+            self.assertFalse(assess(d, 4)["accepted"])
+
+
+class KidsPrintTest(unittest.TestCase):
+    def test_a_print_for_a_child_rejects_and_an_unanswered_flag_does_not(self):
+        d = SourceFilterTest.data(None)
+        d["kids_print"] = True
+        self.assertFalse(assess(d, 4)["accepted"])
+        d.pop("kids_print")
+        self.assertTrue(assess(d, 4)["accepted"])
+
+
 class PrintWithoutPoseTest(unittest.TestCase):
     def test_print_from_any_photo_when_no_adult_front_photo(self):
         d = SourceFilterTest.data(None)
@@ -68,5 +97,8 @@ class PrintWithoutPoseTest(unittest.TestCase):
     def test_rejects_only_when_the_print_is_never_visible(self):
         d = SourceFilterTest.data(None)
         for photo in d["photos"]:
-            photo["role"] = "infographic"
+            photo["role"] = "back"
+        self.assertFalse(assess(d, 4)["accepted"])
+        for photo in d["photos"]:
+            photo.update(role="infographic", whole_print=False)  # a banner that crops the print
         self.assertFalse(assess(d, 4)["accepted"])

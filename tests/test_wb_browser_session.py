@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
-from printflow.wb_studio.infrastructure.wb.search import browser_page,parsing_session,access_is_pending,browser_options,open_session
+from printflow.wb_studio.infrastructure.wb.browser import browser_page,parsing_session,access_is_pending,browser_options,open_session
 
 
 class BrowserBatchTest(unittest.TestCase):
@@ -29,9 +29,9 @@ class BrowserBatchTest(unittest.TestCase):
                 async def __aenter__(self):return object()
                 async def __aexit__(self,*args):pass
             with patch('playwright.async_api.async_playwright',return_value=Playwright()), \
-                 patch('printflow.wb_studio.infrastructure.wb.search.open_session',AsyncMock(return_value=context)) as opened, \
-                 patch('printflow.wb_studio.infrastructure.wb.search.warm_up',AsyncMock()) as warm, \
-                 patch('printflow.wb_studio.infrastructure.wb.search.browser_options',return_value={'headless':False}):
+                 patch('printflow.wb_studio.infrastructure.wb.browser.open_session',AsyncMock(return_value=context)) as opened, \
+                 patch('printflow.wb_studio.infrastructure.wb.browser.warm_up',AsyncMock()) as warm, \
+                 patch('printflow.wb_studio.infrastructure.wb.browser.browser_options',return_value={'headless':False}):
                 with self.assertRaisesRegex(RuntimeError,'test'):
                     async with parsing_session():
                         async with browser_page({}) as first:self.assertIs(first[1],page)
@@ -45,7 +45,7 @@ class BrowserBatchTest(unittest.TestCase):
 
     def test_cached_batch_does_not_launch_browser(self):
         async def run():
-            with patch('printflow.wb_studio.infrastructure.wb.search.open_session',AsyncMock()) as opened:
+            with patch('printflow.wb_studio.infrastructure.wb.browser.open_session',AsyncMock()) as opened:
                 async with parsing_session():pass
                 opened.assert_not_awaited()
         asyncio.run(run())

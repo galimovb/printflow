@@ -1,7 +1,10 @@
 """Studio-wide constants and naming rules."""
 
 PRODUCT = "tee_wb"
-ALGORITHMS = ("standard", "source_redraw")
+ALGORITHMS = ("standard", "source_redraw", "model_reference", "template_mockup")
+# Algorithms that read the seller's whole gallery for the print; model_reference puts ready models in the frames,
+# template_mockup prints onto ready mockup series.
+REDRAW_ALGORITHMS = ("source_redraw", "model_reference", "template_mockup")
 # Generation order: white first, so black scenes can repeat the white ones.
 COLORS = ("white", "black")
 

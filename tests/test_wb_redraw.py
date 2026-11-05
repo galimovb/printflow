@@ -1,11 +1,9 @@
 """source_redraw: gallery filter, one extracted print, parallel model photos."""
 
 import asyncio
-import io
 import unittest
 from unittest.mock import patch
 
-from PIL import Image
 from support import TempDir, new_repository
 from support_mousepad import FakeStorage
 from test_wb_studio import image
@@ -13,13 +11,12 @@ from test_wb_studio import image
 from printflow.domain.errors import PermanentError
 from printflow.wb_studio.application.studio import Studio
 from printflow.wb_studio.config import load_config
-from printflow.wb_studio.domain.print_contrast import vanishing_ink
 from printflow.wb_studio.domain.prompts import live_photo_prompt
 from printflow.wb_studio.infrastructure.generation import Generator
 from printflow.wb_studio.infrastructure.wb.search import NO_PHOTOS, validate_product_urls
 
 PRODUCT_URL = "https://www.wildberries.ru/catalog/123/detail.aspx"
-GENERATOR = "printflow.wb_studio.application.studio.Generator"
+GENERATOR = "printflow.wb_studio.application.cards.Generator"
 RESOLVER = "printflow.wb_studio.infrastructure.wb.search.resolve_product_urls"
 
 
@@ -36,8 +33,10 @@ def listing(count=1, complete=True, sku="123"):
 class RedrawImages:
     """Fake generator: accepts everything unless told otherwise and records every paid call."""
 
-    def __init__(self, selected=(0,), audience="male", accepted=True, shirt_color=None):
+    def __init__(self, selected=(0,), audience="male", accepted=True, shirt_color=None, recolor=None):
         self.calls = []
+        self.recolor = {"white": "lettering", "black": "none"} if recolor is None else recolor
+        self.people = []
         self.shirt_color = shirt_color
         self.selected = list(selected)
         self.audience = audience
@@ -55,6 +54,7 @@ class RedrawImages:
                        "original_selected": self.selected},
             "audience": self.audience,
             "shirt_color": self.shirt_color,
+            "recolor": self.recolor,
             "text": {"title": "Футболка с принтом кот", "description": "Кот"},
         }  # fmt: skip
 
@@ -62,17 +62,28 @@ class RedrawImages:
         self.calls.append(("extract", feedback))
         return image()
 
-    async def recolor_print(self, art, color, feedback=""):
+    async def tone_print(self, source, color, expected="", feedback=""):
+        self.calls.append(("tone", color))
+        return image()
+
+    async def recolor_print(self, art, color, action, feedback=""):
         self.calls.append(("recolor", color))
         return image()
 
-    async def verify_prints(self, source, prints, expected=""):
+    async def verify_prints(self, source, prints, expected="", changes=None):
         self.calls.append(("verify", tuple(prints)))
         reason = "seller poster instead of actual ink" if self.reject_prints else ""
         return {key: {"accepted": not self.reject_prints, "reason": reason} for key in prints}
 
-    async def live_photo(self, product, art, color, index, audience="unisex", pose=None, geometry=None):
+    async def live_photo(
+        self, product, art, color, index, audience="unisex", pose=None, geometry=None, seed=0, scene=None, person=None
+    ):
         self.calls.append(("live", color, index, audience, pose is not None))
+        self.people.append(person)
+        return image()
+
+    async def template_photo(self, template, art, color, geometry=None):
+        self.calls.append(("template", color))
         return image()
 
 
@@ -80,7 +91,7 @@ def temporary_keys(studio):
     return [key for key in studio.storage.objects if key.startswith("tee-temporary-storage/")]
 
 
-async def queued_card(tmp, sources):
+async def queued_card(tmp, sources, algorithm="source_redraw", models=None, templates=None):
     repo = new_repository(tmp)
 
     async def search(*_):
@@ -89,8 +100,8 @@ async def queued_card(tmp, sources):
     async def fetch(*_):
         return image()
 
-    studio = Studio(repo, FakeStorage(), {}, search=search, fetch=fetch)
-    root, _ = studio.campaign(["кот"], 20, design_limit=1, algorithm="source_redraw")[0]
+    studio = Studio(repo, FakeStorage(), {}, search=search, fetch=fetch, models=models, templates=templates)
+    root, _ = studio.campaign(["кот"], 20, design_limit=1, algorithm=algorithm)[0]
     result = await studio.discovery(root, lambda *_: None)
     job = repo.get(result["cards"][0]["id"])
 
@@ -108,7 +119,7 @@ class RedrawPipelineTest(unittest.TestCase):
                 generator = RedrawImages(selected=(0, 2))
                 with patch(GENERATOR, return_value=generator):
                     result = await studio.card(job, save)
-                    # analysis + extract + white recolor (white ink on white) + one check + 8 photos
+                    # analysis + extract + white recolor (asked by the analysis) + one check + 8 photos
                     self.assertEqual(len(generator.calls), 12)
                     await studio.card(repo.get(job.id), save)
                     self.assertEqual(len(generator.calls), 12)
@@ -144,6 +155,26 @@ class RedrawPipelineTest(unittest.TestCase):
                 self.assertEqual(list(result["vendor_codes"]), ["black"])
                 self.assertEqual(list(result["article_prints"]), ["black"])
                 self.assertEqual(result["config"]["colors"], ["black"])
+
+        asyncio.run(run())
+
+    def test_resumed_card_with_prints_done_does_not_need_seller_photos(self):
+        async def run():
+            with TempDir() as tmp:
+                studio, repo, job, save = await queued_card(tmp, [listing(6)])
+                generator = RedrawImages(selected=(0, 2), shirt_color="black")
+                with patch(GENERATOR, return_value=generator):
+                    await studio.card(job, save)
+                current = repo.get(job.id)
+                result = dict(current.result)
+                result.pop("review_required", None)
+                result["photo_checkpoints"]["black"].pop("2")  # one frame left to draw after a restart
+                repo.save_progress(job.id, stage="started", result=result)
+                for key in [k for k in studio.storage.objects if k.startswith("tee-temporary-storage/")]:
+                    del studio.storage.objects[key]  # seller photos already cleaned up
+                with patch(GENERATOR, return_value=generator):
+                    resumed = await studio.card(repo.get(job.id), save)
+                self.assertEqual(len(resumed["images"]["black"]), 6)
 
         asyncio.run(run())
 
@@ -266,7 +297,7 @@ class RedrawGeneratorTest(unittest.TestCase):
         asyncio.run(run())
         self.assertEqual(calls[0][0], ["main-product.png", "artwork.png"])
         self.assertEqual(calls[1][0], ["main-product.png", "artwork.png", "pose-reference.png"])
-        self.assertIn("a young woman aged 18–25", calls[0][1])
+        self.assertIn("a woman aged 18–45", calls[0][1])
         self.assertIn("Repeat the pose", calls[1][1])
 
     def test_live_photo_prompt_follows_audience_and_pose(self):
@@ -277,10 +308,15 @@ class RedrawGeneratorTest(unittest.TestCase):
                 self.assertIn("any gender", prompt)
                 for stale in ("seller", "Extract the ink"):
                     self.assertNotIn(stale, prompt)
-        self.assertIn("a young man", live_photo_prompt("white", 0, "male"))
+        self.assertIn("a man aged 18–45", live_photo_prompt("white", 0, "male"))
+        # A frame without a seller pose takes the fixed scene the analysis ranked, not the one of its slot.
+        self.assertIn("CLOSE-UP", live_photo_prompt("white", 1, scene=3))
+        # Backgrounds differ between frames of a card and between neighbouring cards.
+        self.assertNotEqual(live_photo_prompt("white", 1, seed=1), live_photo_prompt("white", 2, seed=1))
+        self.assertNotEqual(live_photo_prompt("white", 1, seed=1), live_photo_prompt("white", 1, seed=2))
         posed = live_photo_prompt("black", 3, pose=True)
         self.assertIn("says nothing about the shirt, the print", posed)
-        self.assertNotIn("PRINT AND FIT VIEW", posed)
+        self.assertNotIn("CLOSE-UP", posed)
         self.assertIn("the face may be outside the crop", live_photo_prompt("black", 3))
         sized = live_photo_prompt("white", 0, geometry={"body_cm": [54, 70], "width_cm": 30, "height_cm": 24, "top_cm": 8})
         self.assertIn("30 cm wide (56% of the shirt front width", sized)
@@ -289,8 +325,8 @@ class RedrawGeneratorTest(unittest.TestCase):
     def test_gallery_analysis_normalizes_echoed_photo_reference(self):
         answer = {
             "photos": [
-                {"label": "PHOTO_INDEX=0", "role": "back", "same_print": True, "normal_light": True, "adult": True},
-                {"label": "PHOTO_INDEX=1", "role": "front", "same_print": True, "normal_light": True, "adult": True},
+                {"label": "PHOTO_INDEX=0", "role": "back", "same_print": True, "whole_print": True, "normal_light": True, "adult": True},
+                {"label": "PHOTO_INDEX=1", "role": "front", "same_print": True, "whole_print": True, "normal_light": True, "adult": True},
             ],
             "selected": [1],
             "print_source": {"label": "PHOTO_INDEX=1"},
@@ -300,6 +336,7 @@ class RedrawGeneratorTest(unittest.TestCase):
             "print_count": 1,
             "print_width": 0.5,
             "reaches_edges": False,
+            "small_print": False,
             "audience": "female",
             "title": "Футболка с принтом кот",
             "description": "Кот",
@@ -321,20 +358,39 @@ class RedrawGeneratorTest(unittest.TestCase):
         self.assertEqual(result["filter"]["original_selected"], [1])
 
 
-class PrintContrastTest(unittest.TestCase):
-    def test_only_vanishing_ink_needs_a_color_version(self):
-        def print_file(color):
-            canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
-            canvas.paste(Image.new("RGBA", (60, 60), color), (20, 20))
-            out = io.BytesIO()
-            canvas.save(out, format="PNG")
-            return out.getvalue()
+class SourceColorTest(unittest.TestCase):
+    def card_calls(self, recolor):
+        async def run():
+            with TempDir() as tmp:
+                studio, repo, job, save = await queued_card(tmp, [listing(6)])
+                generator = RedrawImages(selected=(0, 2), shirt_color="black", recolor=recolor)
+                with patch(GENERATOR, return_value=generator):
+                    result = await studio.card(job, save)
+                self.assertEqual(list(result["images"]), ["black"])  # the seller's color stays
+                return generator.calls
 
-        self.assertTrue(vanishing_ink(print_file((255, 255, 255, 255)), "white"))
-        self.assertFalse(vanishing_ink(print_file((255, 255, 255, 255)), "black"))
-        self.assertTrue(vanishing_ink(print_file((10, 10, 10, 255)), "black"))
-        self.assertFalse(vanishing_ink(print_file((200, 60, 40, 255)), "white"))
-        self.assertFalse(vanishing_ink(print_file((200, 60, 40, 255)), "black"))
+        return asyncio.run(run())
+
+    def test_card_keeps_the_seller_color_and_its_print_unchanged(self):
+        calls = self.card_calls({"white": "lettering", "black": "none"})
+        self.assertNotIn(("recolor", "black"), calls)  # the analysis found nothing to change for black
+
+    def test_a_flat_logo_is_inverted_by_pixels_and_a_picture_cut_out_again(self):
+        calls = self.card_calls({"white": "invert_flat", "black": "tone"})
+        # the card keeps the seller's black, so only the black version is made: by the seller photo, no recolor
+        self.assertIn(("tone", "black"), calls)
+        self.assertFalse([call for call in calls if call[0] == "recolor"])
+
+    def test_the_analysis_decides_what_to_recolor(self):
+        calls = self.card_calls({"white": "none", "black": "outlines"})
+        self.assertIn(("recolor", "black"), calls)
+
+    def test_frames_without_a_seller_pose_get_different_body_poses(self):
+        poses = {live_photo_prompt("white", i, seed=5).split("POSE: ")[1].split(".")[0] for i in range(4)}
+        self.assertEqual(len(poses), 4)
+        self.assertNotIn("POSE:", live_photo_prompt("white", 1, pose=True))
+        looks = {live_photo_prompt("white", i, "female", seed=5).split("Looks: ")[1].split(".")[0] for i in range(4)}
+        self.assertEqual(len(looks), 4)  # a different person in every frame of a card
 
 
 if __name__ == "__main__":

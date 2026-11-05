@@ -6,7 +6,7 @@ import json
 import re
 
 from openai import AsyncOpenAI
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image
 
 from printflow.domain.errors import PermanentError
 from printflow.services.printing.chromakey import finalize_print
@@ -14,78 +14,9 @@ from printflow.wb_studio.domain import prompts
 from printflow.wb_studio.domain.source_filter import assess
 
 from .errors import generation_errors
+from .images import blurred, data_url, jpeg, numbered_photo, on_canvas, on_fabric, on_gray, png, shrunk
 
 REASONING_MODELS = ("gpt-5", "gpt-6", "o1", "o3", "o4")
-
-
-def data_url(raw: bytes, mime: str = "image/jpeg") -> str:
-    return f"data:{mime};base64," + base64.b64encode(raw).decode()
-
-
-def jpeg(image: Image.Image, quality: int = 90) -> bytes:
-    out = io.BytesIO()
-    image.convert("RGB").save(out, format="JPEG", quality=quality)
-    return out.getvalue()
-
-
-def png(image: Image.Image) -> bytes:
-    out = io.BytesIO()
-    image.save(out, format="PNG")
-    return out.getvalue()
-
-
-def label_font(size: int) -> ImageFont.ImageFont:
-    for name in ("C:/Windows/Fonts/arial.ttf", "DejaVuSans.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def numbered_photo(raw: bytes, index: int) -> bytes:
-    """Gallery photo with a visible PHOTO_INDEX header, so answers cite the right photo."""
-    image = Image.open(io.BytesIO(raw)).convert("RGB")
-    image.thumbnail((900, 900))
-    numbered = Image.new("RGB", (image.width, image.height + 65), "white")
-    numbered.paste(image, (0, 65))
-    ImageDraw.Draw(numbered).text((10, 10), f"PHOTO_INDEX={index}", font=label_font(34), fill="black")
-    return jpeg(numbered, quality=85)
-
-
-def on_gray(raw: bytes) -> bytes:
-    """Transparent prints on neutral gray, so the judge never mistakes background for ink."""
-    image = Image.open(io.BytesIO(raw)).convert("RGBA")
-    image.thumbnail((1024, 1024))
-    background = Image.new("RGBA", image.size, "#bbbbbb")
-    background.alpha_composite(image)
-    return jpeg(background)
-
-
-def on_canvas(raw: bytes, ratio: float) -> bytes:
-    """Print centered on a chromakey canvas of the output aspect, so the model has no reason to extend it."""
-    image = Image.open(io.BytesIO(raw)).convert("RGBA")
-    width = max(image.width, round(image.height * ratio)) + image.width // 5
-    height = round(width / ratio)
-    canvas = Image.new("RGBA", (width, height), "#90EE90")
-    canvas.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
-    return png(canvas.convert("RGB"))
-
-
-def blurred(raw: bytes, side: int = 1200) -> bytes:
-    """Pose stays readable, the seller's print and its placement do not."""
-    image = Image.open(io.BytesIO(raw)).convert("RGB")
-    image.thumbnail((side * 3 // 4, side))
-    return png(image.filter(ImageFilter.GaussianBlur(max(6, image.width // 60))))
-
-
-def shrunk(raw: bytes, side: int) -> bytes:
-    """Input images are billed by size; model photos need only the layout, not the full resolution."""
-    image = Image.open(io.BytesIO(raw))
-    if max(image.size) <= side:
-        return raw
-    image.thumbnail((side, side), Image.Resampling.LANCZOS)
-    return png(image)
 
 
 def photo_index(value) -> int | None:
@@ -127,7 +58,13 @@ class Generator:
 
     @generation_errors
     async def edit(
-        self, files: list[tuple], prompt: str, *, request_timeout: float | None = None, quality: str | None = None
+        self,
+        files: list[tuple],
+        prompt: str,
+        *,
+        request_timeout: float | None = None,
+        quality: str | None = None,
+        size: str | None = None,
     ) -> bytes:
         client = self.client()
         if request_timeout is not None:
@@ -137,7 +74,7 @@ class Generator:
                 model=self.config["image_model"],
                 image=files,
                 prompt=prompt,
-                size=self.config["image_size"],
+                size=size or self.config["image_size"],
                 quality=quality or self.image_quality,
             )
         if not response.data or not response.data[0].b64_json:
@@ -162,10 +99,15 @@ class Generator:
             )
         return json.loads(response.choices[0].message.content)
 
-    async def judge(self, prompt: str, images: list[bytes]) -> dict:
+    async def judge(self, prompt: str, images: list[bytes], fabrics: list[str] | None = None) -> dict:
+        """fabrics: per image the background it is shown on; gray by default."""
+        fabrics = fabrics or ["#bbbbbb"] * len(images)
         content = [{"type": "text", "text": prompt}]
+        # High detail: at low (about 512 px) single letters blur, the judge read words by meaning and passed
+        # «ЧЧИТЕЛЬ» for «УЧИТЕЛЬ» (5219, 2026-11-05).
         content += [
-            {"type": "image_url", "image_url": {"url": data_url(on_gray(raw)), "detail": "low"}} for raw in images
+            {"type": "image_url", "image_url": {"url": data_url(on_gray(raw, fabric)), "detail": "high"}}
+            for raw, fabric in zip(images, fabrics, strict=True)
         ]
         model = self.vision_model
         return await self.chat_json(content, model=model)
@@ -202,6 +144,9 @@ class Generator:
         assessment = assess(data, len(photos), self.config.get("max_print_width", 0.9))
         audience = data.get("audience") if data.get("audience") in ("female", "male") else "unisex"
         shirt_color = data.get("shirt_color") if data.get("shirt_color") in ("white", "black") else "white"
+        recolor = data.get("recolor") if isinstance(data.get("recolor"), dict) else {}
+        order = [s for s in data.get("scene_order") or [] if s in prompts.SCENE_KEYS]
+        scene_order = list(dict.fromkeys(order + list(prompts.SCENE_KEYS)))
         return {
             "selected": assessment["selected"],
             "print_source": assessment["print_source"],
@@ -210,6 +155,12 @@ class Generator:
             "filter": assessment,
             "audience": audience,
             "shirt_color": shirt_color,
+            # Per shirt color one fixed recolor action; "none" puts the print onto that fabric as it is.
+            "recolor": {
+                color: recolor.get(color) if recolor.get(color) in prompts.RECOLOR_ACTIONS else "none"
+                for color in ("white", "black")
+            },
+            "scene_order": scene_order,
             "text": self.listing_text(data["title"], data["description"][:400], 1500),
         }
 
@@ -218,18 +169,29 @@ class Generator:
         files = [("source-photo.png", source, "image/png")]
         return finalize_print(await self.edit(files, prompt, quality=self.extract_quality))
 
-    async def recolor_print(self, art: bytes, color: str, feedback: str = "") -> bytes:
+    async def recolor_print(self, art: bytes, color: str, action: str, feedback: str = "") -> bytes:
         image = Image.open(io.BytesIO(art))
         box = image.getchannel("A").getbbox() if image.mode == "RGBA" else None
         width, height = (box[2] - box[0], box[3] - box[1]) if box else image.size
-        prompt = prompts.recolor_print_prompt(color, feedback, width / height)
+        prompt = prompts.recolor_print_prompt(color, action, feedback, width / height)
         out_width, out_height = (int(x) for x in self.config["image_size"].split("x"))
         files = [("artwork.png", on_canvas(art, out_width / out_height), "image/png")]
         return finalize_print(await self.edit(files, prompt))
 
-    async def verify_prints(self, source: bytes, prints: dict[str, bytes], expected_print: str = "") -> dict:
+    async def tone_print(self, source: bytes, color: str, expected_print: str = "", feedback: str = "") -> bytes:
+        """tone: a picture is cut out of the seller photo again, made for this shirt color directly."""
+        prompt = prompts.tone_print_prompt(color, expected_print, feedback)
+        files = [("source-photo.png", source, "image/png")]
+        return finalize_print(await self.edit(files, prompt, quality=self.extract_quality))
+
+    async def verify_prints(
+        self, source: bytes, prints: dict[str, bytes], expected_print: str = "", changes: dict | None = None
+    ) -> dict:
         keys = list(prints)
-        data = await self.judge(prompts.verify_prints_prompt(keys, expected_print), [source, *prints.values()])
+        prompt = prompts.verify_prints_prompt(keys, expected_print, changes)
+        # A color version is judged on its own fabric: that is how it is printed and what the buyer sees.
+        fabrics = ["#bbbbbb", *("#bbbbbb" if key == "base" else key for key in keys)]
+        data = await self.judge(prompt, [source, *prints.values()], fabrics)
         for key in keys:
             if not isinstance(data.get(key), dict) or type(data[key].get("accepted")) is not bool:
                 raise RuntimeError("Missing automatic print verification")
@@ -244,6 +206,9 @@ class Generator:
         audience: str = "unisex",
         pose: bytes | None = None,
         geometry: dict | None = None,
+        seed: int = 0,
+        scene: int | None = None,
+        person: bytes | None = None,
     ) -> bytes:
         side = self.photo_input_side
         files = [
@@ -252,8 +217,22 @@ class Generator:
         ]
         if pose:
             files.append(("pose-reference.png", blurred(pose, side * 2 // 3), "image/png"))
-        prompt = prompts.live_photo_prompt(color, index, audience, bool(pose), geometry)
+        if person:
+            files.append(("person-reference.png", shrunk(person, side), "image/png"))
+        prompt = prompts.live_photo_prompt(color, index, audience, bool(pose), geometry, seed, scene, bool(person))
         return await self.edit(files, prompt, quality=self.photo_quality)
+
+    async def template_photo(self, template: bytes, art: bytes, color: str, geometry: dict | None = None) -> bytes:
+        """template_mockup: the print onto a ready mockup photo, the photo itself unchanged."""
+        side = self.photo_input_side
+        files = [
+            ("template.png", shrunk(template, side * 2), "image/png"),
+            ("artwork.png", shrunk(on_fabric(art, color), side), "image/png"),
+        ]
+        # The template's own size: asked for 3:4, the model reframes the photo and loses detail and lettering.
+        width, height = Image.open(io.BytesIO(template)).size
+        prompt = prompts.template_photo_prompt(color, geometry)
+        return await self.edit(files, prompt, quality=self.photo_quality, size=f"{width}x{height}")
 
     # --- standard -------------------------------------------------------------
 

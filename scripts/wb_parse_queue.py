@@ -16,7 +16,7 @@ import httpx
 
 from printflow.config import load_app_settings, read_env
 from printflow.wb_studio.config import default_colors
-from printflow.wb_studio.infrastructure.wb import search
+from printflow.wb_studio.infrastructure.wb import browser, search
 
 RESOLVE_CHUNK = 20  # resolve_product_urls accepts at most 20 links per call
 
@@ -49,7 +49,7 @@ async def send(client: httpx.Client, body: dict, token: str) -> httpx.Response:
     raise SystemExit("Очередь недоступна 10 минут")
 
 
-@search.parsing_batch
+@browser.parsing_batch
 async def run(args, themes: list[str]) -> None:
     env = read_env()
     token = env.get("PRINTFLOW_WB_API_TOKEN", "")
@@ -63,7 +63,7 @@ async def run(args, themes: list[str]) -> None:
                 print(f"[{number}/{len(themes)}] {theme}: товаров с галереями не найдено", flush=True)
                 continue
             work = min(args.count, len(sources))
-            body = {"theme": theme, "sources": sources, "algorithm": "source_redraw", "colors": colors,
+            body = {"theme": theme, "sources": sources, "algorithm": args.algorithm, "colors": colors,
                     "design_limit": work}  # fmt: skip
             response = await send(client, body, token)
             print(f"[{number}/{len(themes)}] {theme}: в работу {work}, в запасе {len(sources) - work},"
@@ -78,6 +78,11 @@ def main() -> None:
     parser.add_argument("--count", type=int, choices=range(1, 21), default=20, help="products per theme")
     parser.add_argument("--search", type=int, choices=range(1, 61), default=50, help="products found, reserve included")
     parser.add_argument("--colors", nargs="+", choices=["white", "black"])
+    parser.add_argument(
+        "--algorithm", choices=["source_redraw", "model_reference", "template_mockup"], default="source_redraw",
+        help="model_reference: people in the frames are ready models from wb_studio/assets/models; "
+        "template_mockup: the print goes onto ready mockup series from the tee-mockup-template-* buckets",
+    )
     parser.add_argument("--api", help="PrintFlow API, default from settings (http://127.0.0.1:8090)")
     args = parser.parse_args()
     args.search = max(args.search, args.count)

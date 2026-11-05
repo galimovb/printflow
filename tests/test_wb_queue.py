@@ -7,7 +7,8 @@ from printflow.domain.models import JobKind,JobStatus
 from printflow.domain.errors import PermanentError,RetryLater
 from printflow.wb_studio.application.studio import Studio
 from printflow.wb_studio.config import load_config
-from printflow.wb_studio.infrastructure.wb.publisher import Publisher,build_group_payload
+from printflow.wb_studio.infrastructure.wb.publisher import Publisher
+from printflow.wb_studio.infrastructure.wb.payloads import build_group_payload
 
 FAST={'PRINTFLOW_WB_MERGE_DESIGNS':'2','PRINTFLOW_WB_WORKERS':'2',
       'PRINTFLOW_WB_QUEUE_POLL_SEC':'.01','PRINTFLOW_WB_RETRY_DELAYS_SEC':'0,0,0'}
@@ -158,7 +159,7 @@ class WbQueueTest(unittest.TestCase):
                 repo.complete(cards[0].id,draft(1))
                 with self.assertRaisesRegex(ValueError,'все принты'):studio.enqueue_publication(cards[0].id)
                 repo.complete(cards[1].id,draft(2));repo.complete(cards[2].id,draft(3))
-                with patch('printflow.wb_studio.application.studio.load_config',return_value=draft(1)['config']):
+                with patch('printflow.wb_studio.application.publication.load_config',return_value=draft(1)['config']):
                     one,created=studio.enqueue_publication(cards[0].id);two,again=studio.enqueue_publication(cards[1].id)
                     tail,_=studio.enqueue_publication(cards[2].id)
                 self.assertTrue(created);self.assertFalse(again);self.assertEqual(one.id,two.id)
@@ -172,7 +173,9 @@ class WbQueueTest(unittest.TestCase):
             async def request(path,body):
                 calls.append((path,copy.deepcopy(body)))
                 if path.endswith('/list'):
-                    vendor=body['settings']['filter']['textSearch'];return {'cards':[cards[vendor]] if vendor in cards else []}
+                    flt=body['settings']['filter']
+                    if 'imtID' in flt:return {'cards':[c for c in cards.values() if c['imtID']==flt['imtID']]}
+                    vendor=flt['textSearch'];return {'cards':[cards[vendor]] if vendor in cards else []}
                 if path.endswith('/barcodes'):return {'data':[str(i) for i in range(body['count'])]}
                 if path.endswith('/upload'):
                     for i,v in enumerate(body[0]['variants']):cards[v['vendorCode']]={'vendorCode':v['vendorCode'],'nmID':100+i,'imtID':10+i}
@@ -210,7 +213,7 @@ class WbQueueTest(unittest.TestCase):
 
 class WbGenderTest(unittest.TestCase):
     def test_gender_follows_audience_and_unisex_stays_empty(self):
-        from printflow.wb_studio.infrastructure.wb.publisher import build_payload
+        from printflow.wb_studio.infrastructure.wb.payloads import build_payload
         def gender(audience):
             card=draft(1);card['analysis']={'audience':audience};card['config']['gender_attribute_id']=204557
             variant=build_payload(card,[f'b{i}' for i in range(4)])[0]['variants'][0]
@@ -220,7 +223,7 @@ class WbGenderTest(unittest.TestCase):
         self.assertEqual(gender('unisex'),[])
 
     def test_gender_is_not_sent_without_configured_attribute(self):
-        from printflow.wb_studio.infrastructure.wb.publisher import build_payload
+        from printflow.wb_studio.infrastructure.wb.payloads import build_payload
         card=draft(1);card['analysis']={'audience':'female'}
         names=[c['value'] for c in build_payload(card,[f'b{i}' for i in range(4)])[0]['variants'][0]['characteristics']]
         self.assertNotIn(['Женский'],names)
@@ -290,7 +293,7 @@ class ReserveTest(unittest.TestCase):
             first=studio.enqueue_cards(repo.get(campaign.id),sources[:3])
             repo.complete(first[0]['id'],draft(1));repo.complete(first[1]['id'],draft(2))
             repo.fail(first[2]['id'],'PermanentError: Исходная карточка отклонена фильтром')
-            with patch('printflow.wb_studio.application.studio.load_config',return_value=draft(1)['config']):
+            with patch('printflow.wb_studio.application.publication.load_config',return_value=draft(1)['config']):
                 self.assertEqual(studio.publish_finished_groups(),[])  # the reserve still refills the theme
                 extra=studio.top_up_campaigns()
                 self.assertEqual(studio.publish_finished_groups(),[])  # the refill is still generating
@@ -312,7 +315,7 @@ class ReserveTest(unittest.TestCase):
             repo.complete(campaign.id,{'sources':sources})
             first=studio.enqueue_cards(repo.get(campaign.id),sources)
             repo.complete(first[0]['id'],draft(1));repo.complete(first[1]['id'],draft(2))
-            with patch('printflow.wb_studio.application.studio.load_config',return_value=draft(1)['config']):
+            with patch('printflow.wb_studio.application.publication.load_config',return_value=draft(1)['config']):
                 studio.create_publication(first[0]['id'],'PFWG-old-1',[repo.get(first[0]['id'])])
                 created=studio.publish_finished_groups()
             self.assertEqual([job.payload['card_ids'] for job,_ in created],[[first[1]['id']]])
@@ -346,7 +349,7 @@ class BrowserFallbackTest(unittest.TestCase):
     def test_bundled_chromium_without_google_chrome(self):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
-        from printflow.wb_studio.infrastructure.wb.search import open_session
+        from printflow.wb_studio.infrastructure.wb.browser import open_session
         context=SimpleNamespace(set_default_timeout=lambda *_:None,set_default_navigation_timeout=lambda *_:None,
                                 add_init_script=AsyncMock())
         launch=AsyncMock(return_value=context)

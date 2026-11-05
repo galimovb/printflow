@@ -17,8 +17,8 @@ HERO, FLATLAY, MODEL_FRAMES = 0, 3, 4
 
 
 class StandardPipeline:
-    def __init__(self, studio, job, generator, files: CardFiles):
-        self.studio = studio
+    def __init__(self, cards, job, generator, files: CardFiles):
+        self.cards = cards
         self.job = job
         self.config = job.payload["config"]
         self.generator = generator
@@ -31,12 +31,12 @@ class StandardPipeline:
             self.result["text"] = await self.generator.describe(art, self.job.payload["theme"])
             self.files.save("text_ready", self.result)
         await self.adapt(art)
-        await self.studio.save_article_prints(self.job, self.result, self.files)
+        await self.cards.save_article_prints(self.job, self.result, self.files)
         await self.gallery()
 
     async def extract(self) -> bytes:
         if not self.result.get("source"):
-            raw = to_png(await self.studio.fetch_photo(self.job.payload["source"]["image"]))
+            raw = to_png(await self.cards.fetch_photo(self.job.payload["source"]["image"]))
             self.result["source"] = await self.files.put("temporary", "source.png", raw)
             self.files.save("source_saved", self.result)
         if not self.result.get("print"):
@@ -52,7 +52,7 @@ class StandardPipeline:
         async def adapt(color: str) -> None:
             if color in variants:
                 return
-            async with self.studio.photo_slots:
+            async with self.cards.photo_slots:
                 adapted = await self.generator.adapt_print(art, color)
             variants[color] = await self.files.put("prints", f"prints/{color}.png", adapted)
             self.files.save(f"print_ready:{color}", self.result)
@@ -61,7 +61,7 @@ class StandardPipeline:
 
     async def gallery(self) -> None:
         colors = self.config["colors"]
-        limit = int(self.studio.env.get("PRINTFLOW_WB_REQUESTS_PER_PRINT", "4"))
+        limit = int(self.cards.env.get("PRINTFLOW_WB_REQUESTS_PER_PRINT", "4"))
         card_slots = asyncio.Semaphore(max(1, min(4, limit)))
         arts = {color: await self.files.get("prints", f"prints/{color}.png") for color in colors}
         products = await self.straight_references(arts)
@@ -80,8 +80,8 @@ class StandardPipeline:
                     await tasks["white", index]
                     white_scene = await self.files.get("mockups", f"white/{index + 1:02}.png")
                 product = await self.files.get("mockups", f"{color}/01.png") if index == FLATLAY else products[color]
-                async with card_slots, self.studio.photo_slots:
-                    raw = await self.studio.with_photo_timeout(
+                async with card_slots, self.cards.photo_slots:
+                    raw = await self.cards.with_photo_timeout(
                         self.generator.standard_photo(arts[color], product, color, index, white_scene)
                     )
             else:
