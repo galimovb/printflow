@@ -1,0 +1,49 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WB Studio — проверка</title>
+<link rel="stylesheet" href="/studio/wb/studio.css">
+<style>
+.card-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:10px}.card-head b{font-size:16px}
+.card-body{display:grid;grid-template-columns:150px 1fr;gap:12px}.colors{display:grid;gap:8px;min-width:0}
+.colors .ph{width:142px}.seller .ph{width:150px}
+.actions{display:flex;gap:8px;margin-top:12px}
+@media(max-width:700px){.card-body{grid-template-columns:1fr}}
+</style>
+<header></header>
+<main>
+<div class="page-head"><h1>Проверка перед WB</h1><p class="lead" id="summary"></p></div>
+<div class="alert warn" id="auto" hidden>Включена автопубликация (PRINTFLOW_WB_AUTO_PUBLISH=1): карточки уходят на WB без одобрения.</div>
+<div class="bar">
+<div class="seg" id="views"><button data-v="pending" class="on">Ждут решения</button><button data-v="approved">Одобрены, ещё не на WB</button><button data-v="all">Все</button></div>
+<span class="grow"></span>
+<button id="publish" class="ok" disabled>Выложить одобренные</button>
+<button class="secondary" id="refresh">Обновить</button>
+</div>
+<div id="cards"></div>
+</main>
+<script src="/studio/wb/studio-common.js"></script>
+<script>
+const el=id=>document.getElementById(id),node=WB.node;let cards=[],view='pending';
+const RU={white:'белая',black:'чёрная'};
+const ACTION={none:'без перекраски',invert_flat:'инверсия кодом',tone:'вырезан под ткань',lettering:'надписи',outlines:'контуры',lettering_and_outlines:'надписи и контуры'};
+function skeleton(){const box=el('cards');box.replaceChildren();for(let k=0;k<3;k++){const c=node('div',undefined,'panel');const h=node('div',undefined,'sk');h.style.cssText='width:320px;height:18px;margin-bottom:12px';c.append(h);const strip=node('div',undefined,'strip');for(let i=0;i<6;i++){const s=node('div',undefined,'sk');s.style.cssText='width:142px;height:190px;flex:none';strip.append(s)}c.append(strip);box.append(c)}}
+function render(){const pending=cards.filter(c=>!c.approval),approved=cards.filter(c=>c.approval==='approved');
+el('summary').textContent=`ждут решения: ${pending.length} · одобрены: ${approved.length}`;el('publish').disabled=!approved.length;el('publish').textContent=approved.length?`Выложить одобренные (${approved.length})`:'Выложить одобренные';
+const list=view==='pending'?pending:view==='approved'?approved:cards;const box=el('cards');box.replaceChildren();
+if(!list.length){box.append(node('div','Здесь пусто.','panel empty'));return}
+for(const c of list){const n=node('div',undefined,'panel'+(c.approval==='approved'?' selected':''));const h=node('div',undefined,'card-head');
+h.append(node('b','№'+c.number),node('span',c.title),WB.chip(c.theme));if(c.approval==='approved')h.append(WB.chip('одобрена','ok'));
+const src=node('a','исходник на WB');src.href=c.source_url;src.target='_blank';src.rel='noopener';h.append(src);n.append(h);
+const body=node('div',undefined,'card-body');const s=node('div',undefined,'seller');s.append(WB.photo(c.seller_photo,'фото продавца'));body.append(s);
+const cols=node('div',undefined,'colors');for(const color of Object.keys(c.images)){const block=node('div');block.append(node('div',`${RU[color]||color} · ${ACTION[c.recolor[color]||'none']||c.recolor[color]}`,'hint'));
+const strip=node('div',undefined,'strip');if(c.prints[color])strip.append(WB.photo(c.prints[color],'файл принта','print '+color));c.images[color].slice(0,4).forEach((u,i)=>strip.append(WB.photo(u,'кадр '+(i+1))));block.append(strip);cols.append(block)}
+body.append(cols);n.append(body);const act=node('div',undefined,'actions');
+if(c.approval!=='approved'){const ok=node('button','Одобрить','ok');ok.onclick=()=>decide(c,true,ok);act.append(ok)}
+const no=node('button','Отклонить','danger');no.onclick=()=>{const reason=prompt('Причина (необязательно):','');if(reason!==null)decide(c,false,no,reason)};act.append(no);n.append(act);box.append(n)}}
+function decide(c,approved,button,reason=''){return WB.busy(button,async()=>{await WB.api('/cards/'+c.id+'/decision',{approved,reason});if(approved)c.approval='approved';else cards=cards.filter(x=>x.id!==c.id);WB.say(approved?'Одобрена №'+c.number:'Отклонена №'+c.number,'ok');render()})}
+async function refresh(){skeleton();try{const d=await WB.api('/review');cards=d.cards;el('auto').hidden=!d.auto_publish;render()}catch(e){el('cards').replaceChildren();WB.say(e.message,'error')}}
+for(const b of el('views').querySelectorAll('button'))b.onclick=()=>{for(const x of el('views').children)x.classList.toggle('on',x===b);view=b.dataset.v;render()};
+el('refresh').onclick=()=>WB.busy(el('refresh'),refresh);
+el('publish').onclick=()=>{const n=cards.filter(c=>c.approval==='approved').length;if(!confirm(`Выложить на WB одобренные карточки: ${n}?`))return;
+WB.busy(el('publish'),async()=>{const d=await WB.api('/publish-approved',{});await refresh();WB.say('Поставлено публикаций: '+d.publications.filter(x=>x.created).length,'ok')})};
+WB.start(refresh);
+</script></html>

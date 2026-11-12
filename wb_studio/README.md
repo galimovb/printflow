@@ -35,11 +35,8 @@ api/             HTTP-роуты /api/v1/wb-studio и страница /studio/w
 ## Запуск
 
 ```powershell
-# массовый локальный прогон по теме, без публикации и S3
-.venv/Scripts/python.exe -m printflow.scripts.wb_mass_review --fresh --count 10 --theme "футболка с собакой" --out outputs/run
-
-# очередь через API приложения
-.venv/Scripts/python.exe -m printflow.scripts.wb_batch --theme "футболка с собакой"
+# парсинг темы на этом компьютере и постановка карточек в очередь приложения (темы также ставятся на /studio/wb/themes)
+.venv/Scripts/python.exe -m printflow.scripts.wb_parse_queue --theme "футболка с собакой"
 
 # окно Chrome для ручного прохождения проверки WB
 .venv/Scripts/python.exe -m printflow.scripts.wb_session
@@ -60,7 +57,7 @@ api/             HTTP-роуты /api/v1/wb-studio и страница /studio/w
 
 При временной ошибке (сеть, таймаут) рабочие файлы остаются, повтор продолжает с места.
 На диск сервера ничего не пишется: всё идёт в S3. `PRINTFLOW_WB_KEEP_TEMPORARY=1` оставляет
-рабочие файлы; так делает только локальный `wb_mass_review`, чтобы в HTML были исходники.
+рабочие файлы, чтобы при локальном разборе были видны исходники.
 
 ## Проверки
 

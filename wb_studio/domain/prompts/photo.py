@@ -135,20 +135,6 @@ def print_placement(geometry: dict | None, reference: str | None = "main-product
     )
 
 
-def template_photo_prompt(color: str, geometry: dict | None = None) -> str:
-    """Print onto a ready mockup photo: template.png stays the same photo, only the print is added."""
-    return (
-        "template.png is a finished photo of a person in a blank "
-        f"{color.upper()} T-shirt; artwork.png is the exact print. Return the same photo with artwork.png printed "
-        f"on the front of that T-shirt exactly once, {print_placement(geometry, None)}. Every element, letter, "
-        "proportion and ink color of the print stays unchanged, and every word reads letter by letter exactly as "
-        "in artwork.png, in the same language; the ink follows the fabric folds, light and shadows with a "
-        "matte cotton texture, and parts hidden by an arm or a fold stay hidden. Everything else stays identical: "
-        "the person, face, hair, pose, hands, clothes, shirt cut and color, background, light and framing. "
-        "No added text, badges, borders or collage."
-    )
-
-
 def live_photo_prompt(
     color: str,
     index: int,

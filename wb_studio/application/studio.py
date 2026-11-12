@@ -54,6 +54,9 @@ class Studio:
         self.enqueue_publication = self.publications.enqueue_publication
         self.create_publication = self.publications.create_publication
         self.publish_finished_groups = self.publications.publish_finished_groups
+        self.review_queue = self.publications.review_queue
+        self.decide = self.publications.decide
+        self.publish_approved = self.publications.publish_approved
         self.publish = self.publications.publish
 
     async def supervise(self, stop: asyncio.Event, publish: bool, interval: float = 60) -> None:

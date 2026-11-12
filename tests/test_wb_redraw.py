@@ -8,6 +8,17 @@ from support import TempDir, new_repository
 from support_mousepad import FakeStorage
 from test_wb_studio import image
 
+
+def collage_image():
+    """A 2x2 frame collage whose cells are as big as a template photo."""
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (2400, 3200), "white").save(out, format="PNG")
+    return out.getvalue()
+
 from printflow.domain.errors import PermanentError
 from printflow.wb_studio.application.studio import Studio
 from printflow.wb_studio.config import load_config
@@ -42,6 +53,10 @@ class RedrawImages:
         self.audience = audience
         self.accepted = accepted
         self.reject_prints = False
+        self.lost = {}  # recolor_needed: colors whose print loses nothing on its fabric are set False here
+        self.frame_check = True
+        self.frame_redraw = True
+        self.spoiled = []  # check_frames: per check, the 0-based frames of that check whose print is spoiled
 
     async def analyze_gallery(self, photos, theme, source_title=""):
         self.calls.append("analysis")
@@ -57,6 +72,10 @@ class RedrawImages:
             "recolor": self.recolor,
             "text": {"title": "Футболка с принтом кот", "description": "Кот"},
         }  # fmt: skip
+
+    async def recolor_needed(self, art, colors):
+        self.calls.append(("recolor_needed", tuple(colors)))
+        return {color: self.lost.get(color, True) for color in colors}
 
     async def extract_print(self, source, expected="", feedback=""):
         self.calls.append(("extract", feedback))
@@ -82,9 +101,20 @@ class RedrawImages:
         self.people.append(person)
         return image()
 
-    async def template_photo(self, template, art, color, geometry=None):
-        self.calls.append(("template", color))
-        return image()
+    async def frame_collage(self, collage, products, colors):
+        self.calls.append(("collage", tuple(colors)))
+        return collage_image()
+
+    async def check_frames(self, prints, frames):
+        self.calls.append(("check", tuple(color for color, _ in frames)))
+        spoiled = self.spoiled.pop(0) if self.spoiled else ()
+        return [{"ok": i not in spoiled, "reason": "голова гнома расплылась" if i in spoiled else ""}
+                for i in range(len(frames))]  # fmt: skip
+
+    async def plan_frames(self, photos, count, print_summary=""):
+        """No usable answer by default: the card keeps one template series."""
+        self.calls.append(("plan", len(photos)))
+        return getattr(self, "frame_plan", None) or {"photos": [], "order": []}
 
 
 def temporary_keys(studio):
@@ -112,17 +142,17 @@ async def queued_card(tmp, sources, algorithm="source_redraw", models=None, temp
 
 
 class RedrawPipelineTest(unittest.TestCase):
-    def test_card_uses_twelve_requests_and_resume_repeats_none(self):
+    def test_card_uses_thirteen_requests_and_resume_repeats_none(self):
         async def run():
             with TempDir() as tmp:
                 studio, repo, job, save = await queued_card(tmp, [listing(6)])
                 generator = RedrawImages(selected=(0, 2))
                 with patch(GENERATOR, return_value=generator):
                     result = await studio.card(job, save)
-                    # analysis + extract + white recolor (asked by the analysis) + one check + 8 photos
-                    self.assertEqual(len(generator.calls), 12)
+                    # analysis + extract + is white recolor needed + white recolor + one check + 8 photos
+                    self.assertEqual(len(generator.calls), 13)
                     await studio.card(repo.get(job.id), save)
-                    self.assertEqual(len(generator.calls), 12)
+                    self.assertEqual(len(generator.calls), 13)
                 self.assertIn(("verify", ("base", "white")), generator.calls)
                 self.assertNotIn(("recolor", "black"), generator.calls)
                 live = [call for call in generator.calls if call[0] == "live"]
@@ -283,8 +313,9 @@ class RedrawGeneratorTest(unittest.TestCase):
     def test_photo_generation_gets_only_the_shirt_print_and_optional_pose(self):
         calls = []
 
-        async def edit(files, prompt, quality=None):
+        async def edit(files, prompt, quality=None, purpose=""):
             calls.append(([name for name, *_ in files], prompt))
+            self.assertEqual(purpose, "live_photo")  # the usage log names every request
             self.assertEqual(quality, "low")  # model photos are cheap; print files keep image_quality
             return image()
 

@@ -161,7 +161,7 @@ class StandardGeneratorTest(unittest.TestCase):
         self.assertIn("lounging naturally in a chair", calls[0][1])
         self.assertIn("outfit flat-lay", calls[1][1])
         self.assertTrue(all("Keep the same print 1:1" in call[1] for call in calls))
-        self.assertTrue(all(call[2] == {"request_timeout": 180, "quality": "low"} for call in calls))
+        self.assertTrue(all(call[2] == {"request_timeout": 180, "quality": "low", "purpose": "standard_photo"} for call in calls))
 
     def test_lifestyle_prompts_keep_regular_fit(self):
         for index in (1, 2):
@@ -443,6 +443,11 @@ class PublicationTest(unittest.TestCase):
             with patch("printflow.wb_studio.api.router.read_env", return_value={"PRINTFLOW_WB_API_TOKEN": "test"}):
                 client = TestClient(create_app(app, background=False))
                 self.assertEqual(client.get("/studio/wb").status_code, 200)
+                self.assertEqual(client.get("/studio/wb/review").status_code, 200)
+                self.assertEqual(client.get("/api/v1/wb-studio/review").status_code, 401)
+                self.assertEqual(client.get("/api/v1/wb-studio/review", headers=auth).json()["cards"], [])
+                missing = client.post("/api/v1/wb-studio/cards/none/decision", headers=auth, json={"approved": True})
+                self.assertEqual(missing.status_code, 422)
                 self.assertEqual(client.get("/api/v1/wb-studio/jobs").status_code, 401)
                 self.assertEqual(client.get("/api/v1/wb-studio/jobs", headers=auth).status_code, 200)
                 self.assertEqual(client.get("/api/v1/wb-studio/themes", headers=auth).status_code, 200)

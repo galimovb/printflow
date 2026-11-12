@@ -118,6 +118,234 @@ class JobRepository:
             rows = db.execute("SELECT * FROM jobs WHERE product = ? ORDER BY number", (product,)).fetchall()
             return [self._to_job(r) for r in rows]  # type: ignore[misc]
 
+    # Manual WB review reads only the fields it needs: loading every job of a large queue takes minutes.
+    _WB_SENT = (
+        "SELECT value FROM jobs, json_each(json_extract(jobs.payload, '$.card_ids'))"
+        " WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') = 'wb_publish'"
+    )
+    _WB_WAITING = (
+        "product = 'tee_wb' AND status = 'done' AND json_extract(payload, '$.kind') = 'wb_card'"
+        " AND json_extract(result, '$.review_required') = 1 AND id NOT IN (" + _WB_SENT + ")"
+    )
+
+    def wb_review_rows(self) -> list[dict[str, Any]]:
+        """Finished WB cards not yet sent, with just what a reviewer looks at."""
+        with self._conn() as db:
+            rows = db.execute(
+                "SELECT id, design_number, finished_at, json_extract(payload, '$.theme') AS theme,"
+                " json_extract(payload, '$.source') AS source, json_extract(result, '$.text.title') AS title,"
+                " json_extract(result, '$.print_variants') AS prints, json_extract(result, '$.images') AS images,"
+                " json_extract(result, '$.analysis.recolor') AS recolor,"
+                " json_extract(result, '$.analysis.print_source') AS print_source,"
+                " json_extract(result, '$.approval') AS approval FROM jobs WHERE " + self._WB_WAITING + " ORDER BY number"
+            ).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            for key in ("source", "prints", "images", "recolor"):
+                item[key] = json.loads(item[key]) if item[key] else {}
+            out.append(item)
+        return out
+
+    def wb_card_sent(self, card_id: str) -> bool:
+        with self._conn() as db:
+            return db.execute(self._WB_SENT + " AND value = ? LIMIT 1", (card_id,)).fetchone() is not None
+
+    def wb_approved_cards(self) -> list[Job]:
+        """Approved WB cards not yet sent, full jobs: only these few are loaded for publication."""
+        with self._conn() as db:
+            return [self._to_job(row) for row in db.execute(
+                "SELECT * FROM jobs WHERE " + self._WB_WAITING + " AND json_extract(result, '$.approval') = 'approved'"
+                " ORDER BY number")]  # type: ignore[misc]
+
+    def wb_publication_groups(self) -> set[str]:
+        with self._conn() as db:
+            return {row[0] for row in db.execute(
+                "SELECT json_extract(payload, '$.merge_group') FROM jobs"
+                " WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') = 'wb_publish'")}
+
+    # --- WB themes requested from the interface, parsed on the host --------------------------------------
+
+    def wb_theme_add(self, themes: list[str], *, count: int, search: int, algorithm: str, colors: list[str]) -> list[str]:
+        """New theme requests; a theme already waiting or being parsed is not added twice."""
+        now = _iso(_now())
+        added = []
+        with self._lock, self._conn() as db:
+            db.execute("BEGIN IMMEDIATE")
+            busy = {row[0].lower() for row in db.execute(
+                "SELECT theme FROM wb_theme_requests WHERE status IN ('waiting', 'parsing')")}  # fmt: skip
+            number = db.execute("SELECT ifnull(max(number), 0) FROM wb_theme_requests").fetchone()[0]
+            for theme in themes:
+                if theme.lower() in busy:
+                    continue
+                busy.add(theme.lower())
+                number += 1
+                request_id = uuid.uuid4().hex
+                db.execute(
+                    "INSERT INTO wb_theme_requests (id, number, theme, count, search, algorithm, colors, status,"
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)",
+                    (request_id, number, theme, count, search, algorithm, json.dumps(colors), now, now),
+                )
+                added.append(request_id)
+            db.execute("COMMIT")
+        return added
+
+    def wb_theme_requests(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Newest requests first, each queued one with the card counts of its theme search."""
+        with self._conn() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT * FROM wb_theme_requests ORDER BY number DESC LIMIT ?", (limit,))]  # fmt: skip
+            campaigns = [r["campaign_id"] for r in rows if r["campaign_id"]]
+            counts: dict[str, dict[str, int]] = {}
+            if campaigns:
+                marks = ",".join("?" * len(campaigns))
+                for campaign, status, approval, rejected, n in db.execute(
+                    "SELECT json_extract(payload, '$.campaign_id'), status, json_extract(result, '$.approval'),"
+                    " ifnull(error, '') LIKE 'PermanentError%', count(*)"
+                    " FROM jobs WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') = 'wb_card'"
+                    f" AND json_extract(payload, '$.campaign_id') IN ({marks}) GROUP BY 1, 2, 3, 4",
+                    campaigns,
+                ):
+                    bucket = counts.setdefault(campaign, {})
+                    key = "approved" if status == "done" and approval == "approved" else status
+                    if status == "failed" and not rejected:
+                        key = "error"  # balance, network, rate limit: the print itself was not rejected
+                    bucket[key] = bucket.get(key, 0) + n
+        for row in rows:
+            row["colors"] = json.loads(row["colors"])
+            row["cards"] = counts.get(row["campaign_id"], {})
+        return rows
+
+    def wb_theme_claim(self) -> dict[str, Any] | None:
+        """The oldest waiting request for the host parser; one stuck in parsing for an hour is taken again."""
+        now = _now()
+        with self._lock, self._conn() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM wb_theme_requests WHERE status = 'waiting' OR (status = 'parsing' AND updated_at < ?)"
+                " ORDER BY number LIMIT 1",
+                (_iso(now - timedelta(hours=1)),),
+            ).fetchone()
+            if row is None:
+                db.execute("COMMIT")
+                return None
+            db.execute("UPDATE wb_theme_requests SET status = 'parsing', updated_at = ? WHERE id = ?", (_iso(now), row["id"]))
+            db.execute("COMMIT")
+        value = dict(row)
+        value["colors"] = json.loads(value["colors"])
+        return value
+
+    def wb_theme_finish(self, request_id: str, status: str, *, campaign_id: str | None = None, message: str = "") -> bool:
+        if status not in ("queued", "empty", "failed"):
+            raise ValueError("status: queued | empty | failed")
+        with self._conn() as db:
+            changed = db.execute(
+                "UPDATE wb_theme_requests SET status = ?, campaign_id = ?, message = ?, updated_at = ?"
+                " WHERE id = ? AND status = 'parsing'",
+                (status, campaign_id, message[:500], _iso(_now()), request_id),
+            ).rowcount
+        return bool(changed)
+
+    def wb_theme_cancel(self, request_id: str) -> bool:
+        """Only a request the parser has not taken yet can be withdrawn."""
+        with self._conn() as db:
+            return bool(db.execute("DELETE FROM wb_theme_requests WHERE id = ? AND status = 'waiting'", (request_id,)).rowcount)
+
+    def wb_parser_seen(self, current: str | None = None) -> None:
+        with self._conn() as db:
+            db.execute(
+                "INSERT INTO wb_parser_state (id, seen_at, current) VALUES (1, ?, ?)"
+                " ON CONFLICT(id) DO UPDATE SET seen_at = excluded.seen_at, current = excluded.current",
+                (_iso(_now()), current),
+            )
+
+    def wb_parser_state(self) -> dict[str, Any] | None:
+        with self._conn() as db:
+            row = db.execute("SELECT seen_at, current FROM wb_parser_state WHERE id = 1").fetchone()
+        return dict(row) if row else None
+
+    _WB_QUEUE_VIEWS = {
+        "active": "status IN ('pending', 'running')",
+        "failed": "status = 'failed'",
+        "done": "status = 'done'",
+        "all": "1",
+    }
+
+    def wb_queue(self, view: str = "active", limit: int = 300) -> dict[str, Any]:
+        """Studio queue: light rows of searches, cards and publications, newest activity first, and totals."""
+        where = self._WB_QUEUE_VIEWS[view]
+        with self._conn() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT id, design_number, status, stage, attempts, error, created_at, updated_at, started_at,"
+                " finished_at, available_at, json_extract(payload, '$.kind') AS kind,"
+                " json_extract(payload, '$.theme') AS theme, json_extract(payload, '$.campaign_id') AS campaign_id,"
+                " json_extract(payload, '$.config.algorithm') AS algorithm,"
+                " json_array_length(json_extract(payload, '$.card_ids')) AS cards,"
+                " json_extract(result, '$.text.title') AS title"
+                " FROM jobs WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') IN"
+                f" ('wb_card', 'wb_discover', 'wb_publish') AND {where} ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            )]  # fmt: skip
+            totals = dict(db.execute(
+                "SELECT status, count(*) FROM jobs WHERE product = 'tee_wb'"
+                " AND json_extract(payload, '$.kind') IN ('wb_card', 'wb_discover', 'wb_publish')"
+                " AND status IN ('pending', 'running') GROUP BY status").fetchall())  # fmt: skip
+            since = _iso(_now() - timedelta(hours=24))
+            day = dict(db.execute(
+                "SELECT status, count(*) FROM jobs WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') = 'wb_card'"
+                " AND status IN ('done', 'failed') AND finished_at >= ? GROUP BY status", (since,)).fetchall())  # fmt: skip
+            waiting = db.execute(
+                "SELECT count(*) FROM jobs WHERE product = 'tee_wb' AND status = 'pending' AND available_at > ?",
+                (_iso(_now()),),
+            ).fetchone()[0]
+        return {"rows": rows, "running": totals.get("running", 0), "pending": totals.get("pending", 0),
+                "retry_wait": waiting, "done_24h": day.get("done", 0), "failed_24h": day.get("failed", 0)}  # fmt: skip
+
+    def wb_card_publications(self, card_id: str) -> list[dict[str, Any]]:
+        """Publication jobs that carry this card, with their WB result (nmIDs by vendor code)."""
+        with self._conn() as db:
+            rows = db.execute(
+                "SELECT id, status, stage, error, result, created_at FROM jobs WHERE product = 'tee_wb'"
+                " AND json_extract(payload, '$.kind') = 'wb_publish' AND EXISTS ("
+                "SELECT 1 FROM json_each(json_extract(jobs.payload, '$.card_ids')) WHERE value = ?) ORDER BY number",
+                (card_id,),
+            ).fetchall()
+        return [{**dict(r), "result": json.loads(r["result"] or "{}")} for r in rows]
+
+    def wb_theme_stats(self) -> dict[str, dict[str, Any]]:
+        """Per theme (lower case): searches, last search, card outcomes, cards sent to WB, open request."""
+        stats: dict[str, dict[str, Any]] = {}
+
+        def entry(theme: str) -> dict[str, Any]:
+            return stats.setdefault(theme.lower(), {"runs": 0, "last_at": None, "done": 0, "failed": 0, "errors": 0,
+                                                    "working": 0, "on_wb": 0, "request": None})  # fmt: skip
+
+        with self._conn() as db:
+            for theme, created in db.execute(
+                "SELECT json_extract(payload, '$.theme'), created_at FROM jobs WHERE product = 'tee_wb'"
+                " AND json_extract(payload, '$.kind') = 'wb_discover' AND json_extract(payload, '$.theme') IS NOT NULL"
+            ):
+                item = entry(theme)
+                item["runs"] += 1
+                item["last_at"] = max(item["last_at"] or "", created)
+            sent = {row[0] for row in db.execute(self._WB_SENT)}
+            for job_id, theme, status, rejected in db.execute(
+                "SELECT id, json_extract(payload, '$.theme'), status, ifnull(error, '') LIKE 'PermanentError%' FROM jobs"
+                " WHERE product = 'tee_wb' AND json_extract(payload, '$.kind') = 'wb_card'"
+                " AND json_extract(payload, '$.theme') IS NOT NULL"
+            ):
+                item = entry(theme)
+                if status == "failed":
+                    item["failed" if rejected else "errors"] += 1  # a rejected print or an API error
+                else:
+                    item["done" if status == "done" else "working"] += 1
+                item["on_wb"] += job_id in sent
+            for theme, status in db.execute(
+                "SELECT theme, status FROM wb_theme_requests WHERE status IN ('waiting', 'parsing')"
+            ):
+                entry(theme)["request"] = status
+        return stats
+
     def wb_group_cards(self, key: str) -> list[Job]:
         """Exact persistent members of one WB group; no listing/pagination truncation."""
         with self._conn() as db:

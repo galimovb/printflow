@@ -1,0 +1,127 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WB Studio — очередь</title>
+<link rel="stylesheet" href="/studio/wb/studio.css">
+<style>
+table.grid{min-width:880px}.err{font-size:13px;max-width:420px}
+.drawer .panel{margin-bottom:12px}.drawer .ph{width:120px}.drawer .ph.print{width:150px}
+</style>
+<header></header>
+<main>
+<div class="page-head"><h1>Очередь</h1><p class="lead" id="updated"></p></div>
+<div class="alert bad" id="alert" hidden></div>
+<div class="tiles" id="totals"></div>
+<div class="bar">
+<div class="seg" id="views"><button data-v="active" class="on">В работе и в очереди</button><button data-v="failed">Ошибки</button><button data-v="done">Готовые</button><button data-v="all">Все</button></div>
+<select id="kind"><option value="">Все задачи</option><option value="wb_card">Карточки</option><option value="wb_publish">Выкладка на WB</option><option value="wb_discover">Поиск по теме</option></select>
+<input id="find" type="search" placeholder="Тема или номер">
+<span class="grow"></span>
+<button class="secondary" id="pickFailed">Выбрать все упавшие</button>
+<button id="retry" disabled>Перезапустить выбранные</button>
+<button class="secondary" id="refresh">Обновить</button>
+</div>
+<section class="panel flush"><table class="grid"><thead><tr><th class="check"><input type="checkbox" id="all" title="Выбрать все упавшие на экране"></th><th>№</th><th>Тема</th><th>Задача</th><th>Этап</th><th>Статус</th><th>Обновлено</th><th>Попытки</th><th>Ошибка</th></tr></thead><tbody id="rows"></tbody></table></section>
+</main>
+<div class="veil" id="veil"></div>
+<aside class="drawer" id="drawer"><div class="drawer-head"><h2 id="dtitle"></h2><button class="secondary" id="dclose">Закрыть</button></div><div class="drawer-body" id="dbody"></div></aside>
+<script src="/studio/wb/studio-common.js"></script>
+<script>
+const el=id=>document.getElementById(id),node=WB.node;let view='active',data=null,lastAt=null;const picked=new Set();
+const KIND={wb_card:'карточка',wb_publish:'выкладка на WB',wb_discover:'поиск по теме'};
+const STATUS={running:['в работе','info'],pending:['в очереди','warn'],done:['готово','ok'],failed:['ошибка','bad']};
+const COLS=9;
+function stage(row){const s=row.stage||'';let m;
+if(row.kind==='wb_publish'){if(row.status==='done')return'выложено';return s==='wb_publish'?'отправка карточек на WB':s==='waiting'?'ждёт повтора':'запуск'}
+if(row.kind==='wb_discover')return row.status==='done'?'товары найдены':'поиск товаров';
+if((m=s.match(/^photo:(white|black):(\d+)$/)))return`кадр ${m[2]} · ${m[1]==='white'?'белая':'чёрная'}`;
+if((m=s.match(/^source_saved:(\d+)$/)))return`скачивает фото продавца (${m[1]})`;
+if((m=s.match(/^print_recolored:(\w+)$/)))return`перекраска для ${m[1]==='white'?'белой':'чёрной'}`;
+if((m=s.match(/^print_ready:(\w+)$/)))return`принт готов (${m[1]==='white'?'белая':'чёрная'})`;
+const map={started:'запущена',queued:'в очереди',source_saved:'фото продавца скачаны',gallery_analyzed:'галерея проанализирована',source_rejected:'отклонена фильтром',
+frames_planned:'кадры выбраны',print_extracted:'принт вырезан',print_checked:'принт проверен',print_ready:'принт готов',article_prints_ready:'файлы печати готовы',text_ready:'название и описание готовы',
+ready_for_review:'готова, ждёт проверки',done:'готова',failed:'остановлена',waiting:'ждёт повтора',retry_wait:'ждёт повтора'};
+if(s.startsWith('article_print_ready'))return'файл печати готов';return map[s]||s}
+function problem(error){if(!error)return null;
+if(error.includes('credit_balance_exhausted'))return{text:'Нет денег на балансе OpenAI',cls:'warn-text'};
+if(error.includes('moderation_blocked'))return{text:'Модерация OpenAI отклонила изображение',cls:'error'};
+if(error.includes('rate limit')||error.includes('HTTP 429'))return{text:'Ограничение частоты запросов, повторит сама',cls:'warn-text'};
+if(error.startsWith('PermanentError'))return{text:error.replace(/^PermanentError:\s*/,'').replace(/Исходная карточка отклонена фильтром:\s*/,'Фильтр: '),cls:'error'};
+return{text:error.replace(/^RuntimeError:\s*/,'').slice(0,200),cls:'warn-text'}}
+function statusChip(r){const retry=r.status==='pending'&&r.available_at&&new Date(r.available_at)>new Date();const [text,kind]=retry?['ждёт повтора','warn']:(STATUS[r.status]||[r.status,'']);return WB.chip(text,kind)}
+/* --- totals --- */
+function tiles(d){const t=el('totals');t.replaceChildren();for(const [v,label,cls] of [[d.running,'в работе','ok'],[d.pending-d.retry_wait,'ждут очереди',''],[d.retry_wait,'ждут повтора после ошибки','warn'],[d.done_24h,'карточек готово за 24 ч','ok'],[d.failed_24h,'карточек упало за 24 ч',d.failed_24h?'bad':'']]){const x=node('div',undefined,'tile '+cls);x.append(node('span',label),node('b',v));t.append(x)}}
+function skeleton(){WB.skeletonRows(el('rows'),[16,40,160,90,160,70,80,30,200],8);
+el('totals').replaceChildren(...Array.from({length:5},()=>{const x=node('div',undefined,'tile');const s=node('div',undefined,'sk');s.style.cssText='width:70%;height:34px';x.append(s);return x}))}
+/* --- selection and retry --- */
+function visible(){if(!data)return[];const k=el('kind').value,q=el('find').value.trim().toLowerCase();
+return data.rows.filter(r=>(!k||r.kind===k)&&(!q||(r.theme||'').toLowerCase().includes(q)||String(r.design_number||'').includes(q)))}
+function updateRetry(){for(const id of [...picked])if(!data||!data.rows.some(r=>r.id===id&&r.status==='failed'))picked.delete(id);
+const n=picked.size;el('retry').disabled=!n;el('retry').textContent=n?`Перезапустить выбранные (${n})`:'Перезапустить выбранные';
+const failed=visible().filter(r=>r.status==='failed');el('all').checked=failed.length>0&&failed.every(r=>picked.has(r.id));el('all').disabled=!failed.length}
+el('pickFailed').onclick=()=>{const failed=visible().filter(r=>r.status==='failed');if(!failed.length){WB.say('Упавших задач на экране нет');return}for(const r of failed)picked.add(r.id);render()};
+el('all').onchange=()=>{for(const r of visible().filter(r=>r.status==='failed'))el('all').checked?picked.add(r.id):picked.delete(r.id);render()};
+el('retry').onclick=()=>{const ids=[...picked];if(!confirm(`Перезапустить задач: ${ids.length}? Карточка продолжит с того места, где упала; уже сделанные шаги заново не оплачиваются.`))return;
+WB.busy(el('retry'),async()=>{const d=await WB.api('/jobs/retry',{ids});picked.clear();WB.say(`Перезапущено: ${d.retried.length}`+(d.skipped.length?`, пропущено (уже не в ошибке): ${d.skipped.length}`:''),'ok');await refresh()})};
+/* --- table --- */
+function render(){if(!data)return;tiles(data);const rows=visible();
+const credit=data.rows.some(r=>(r.error||'').includes('credit_balance_exhausted')&&r.status!=='done');el('alert').hidden=!credit;
+el('alert').textContent='Часть задач упала с ошибкой «нет денег на балансе OpenAI». Пополните баланс, затем отметьте их и нажмите «Перезапустить выбранные».';
+const b=el('rows');if(!rows.length){WB.emptyRow(b,'Пусто.',COLS);updateRetry();return}b.replaceChildren();
+for(const r of rows){const tr=node('tr',undefined,'click'+(picked.has(r.id)?' sel':''));
+const ct=node('td',undefined,'check');if(r.status==='failed'){const cb=node('input');cb.type='checkbox';cb.checked=picked.has(r.id);cb.onclick=e=>e.stopPropagation();
+cb.onchange=()=>{cb.checked?picked.add(r.id):picked.delete(r.id);tr.classList.toggle('sel',cb.checked);updateRetry()};ct.append(cb)}
+const theme=node('td');theme.append(node('div',r.theme||'—'));if(r.title)theme.append(node('div',r.title,'sub'));
+const what=node('td');what.append(node('div',KIND[r.kind]||r.kind));if(r.kind==='wb_publish'&&r.cards)what.append(node('div',r.cards+' карточек','sub'));else if(r.algorithm)what.append(node('div',r.algorithm,'sub'));
+const st=node('td');st.append(statusChip(r));
+const up=node('td',WB.ago(r.updated_at),'muted');up.title=WB.when(r.updated_at);
+const p=problem(r.error);const er=node('td');if(p){const d=node('div',p.text,'err '+p.cls);d.title=r.error;er.append(d)}
+tr.append(ct,node('td',r.design_number||''),theme,what,node('td',stage(r)),st,up,node('td',r.attempts||''),er);tr.onclick=()=>openDetail(r.id);b.append(tr)}
+updateRetry()}
+async function refresh(force){if(force||!data)skeleton();try{data=await WB.api('/queue?view='+view+'&limit=400');lastAt=Date.now();render()}catch(e){WB.say(e.message,'error')}}
+for(const b of el('views').querySelectorAll('button'))b.onclick=()=>{for(const x of el('views').children)x.classList.toggle('on',x===b);view=b.dataset.v;refresh(true)};
+el('kind').onchange=render;el('find').oninput=render;el('refresh').onclick=()=>WB.busy(el('refresh'),()=>refresh());
+setInterval(()=>{if(lastAt)el('updated').textContent='обновлено '+Math.round((Date.now()-lastAt)/1000)+' с назад · обновляется само каждые 5 с'},1000);
+setInterval(()=>{if(!document.hidden&&data)refresh()},5000);
+/* --- card detail --- */
+const RU={white:'белая',black:'чёрная'};
+const ACTION={none:'без перекраски',invert_flat:'инверсия цвета (кодом)',tone:'вырезан заново под ткань',lettering:'перекрашены надписи',outlines:'перекрашены контуры',lettering_and_outlines:'перекрашены надписи и контуры'};
+const PURPOSE={analysis:'анализ галереи',extract:'вырезка принта',recolor:'перекраска',tone:'вырезка под ткань',verify:'проверка принта',frame_plan:'план кадров',frame:'кадр на модели',live_photo:'фото на модели',standard_photo:'фото на модели',describe:'название и описание',adapt:'адаптация принта'};
+const ROLE={front:'спереди',back:'спина',detail:'деталь',infographic:'инфографика',other:'другое'};
+const FRAME=['кадр 1','кадр 2','кадр 3','кадр 4','слайд','слайд'];
+function panel(title){const b=node('div',undefined,'panel');b.append(node('h3',title));el('dbody').append(b);return b}
+function kv(parent,pairs){const d=node('dl',undefined,'kv');for(const [k,v] of pairs){if(v===undefined||v===null||v==='')continue;d.append(node('dt',k));const dd=node('dd');if(v instanceof Node)dd.append(v);else dd.textContent=v;d.append(dd)}parent.append(d)}
+function wbLinks(nm){const s=node('span');for(const [color,id] of Object.entries(nm||{})){if(!id)continue;const a=node('a',(RU[color]||color)+' '+id);a.href='https://www.wildberries.ru/catalog/'+id+'/detail.aspx';a.target='_blank';a.rel='noopener';s.append(a,document.createTextNode('  '))}return s.childNodes.length?s:null}
+function detailSkeleton(){const b=el('dbody');b.replaceChildren();for(const h of [60,170,120,210,190]){const x=node('div',undefined,'panel');const s=node('div',undefined,'sk');s.style.cssText='width:100%;height:'+h+'px';x.append(s);b.append(x)}}
+async function openDetail(id){el('veil').classList.add('on');el('drawer').classList.add('on');el('dtitle').textContent='Загрузка…';detailSkeleton();
+  try{renderDetail(await WB.api('/jobs/'+id+'/detail'))}catch(e){el('dbody').replaceChildren(node('p',e.message,'error'))}}
+function closeDetail(){el('veil').classList.remove('on');el('drawer').classList.remove('on')}
+el('dclose').onclick=closeDetail;el('veil').onclick=closeDetail;document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDetail()});
+function renderDetail(d){
+  el('dbody').replaceChildren();el('dtitle').textContent=(d.number?'№'+d.number+' · ':'')+(KIND[d.kind]||d.kind)+(d.theme?' · '+d.theme:'');
+  const p=problem(d.error);const state=panel('Состояние');
+  kv(state,[['Статус',statusChip(d)],['Этап',stage(d)],['Попыток',d.attempts],['Ошибка',p?node('span',p.text,p.cls):null],['Создана',WB.when(d.created_at)],['Запущена',WB.when(d.started_at)],['Завершена',WB.when(d.finished_at)]]);
+  if(d.status==='failed'){const again=node('button','Перезапустить');again.style.marginTop='10px';again.onclick=()=>WB.busy(again,async()=>{await WB.api('/jobs/retry',{ids:[d.id]});WB.say('Перезапущено: №'+(d.number||''),'ok');closeDetail();await refresh()});state.append(again)}
+  if(d.kind==='wb_publish'){const b=panel('Карточки в публикации');const t=node('table',undefined,'grid');
+    for(const c of d.cards||[]){const tr=node('tr');const td=node('td');const l=wbLinks(c.nm);td.append(l||node('span','ещё нет на WB','muted'));tr.append(node('td','№'+(c.number||'?')),node('td',c.title||''),td);t.append(tr)}b.append(t);return}
+  if(d.kind==='wb_discover'){kv(panel('Поиск'),[['Найдено товаров',d.found],['В работу',d.design_limit],['Алгоритм',d.algorithm]]);return}
+  const src=panel('Из чего сделано');const a=node('a',d.source.title||d.source.url||'карточка продавца');a.href=d.source.url;a.target='_blank';a.rel='noopener';
+  kv(src,[['Исходник на WB',a],['Алгоритм',d.algorithm]]);
+  const strip=node('div',undefined,'strip');
+  d.source.photos.forEach((u,i)=>{const r=d.source.roles[String(i)]||{};const bits=['фото '+(i+1)];if(i===d.source.print_source)bits.push('отсюда принт');if(r.role)bits.push(ROLE[r.role]||r.role);if(r.whole_print===false)bits.push('принт обрезан');if(r.same_print===false)bits.push('другой принт');strip.append(WB.photo(u,bits.join(' · '),i===d.source.print_source?'mark':''))});
+  src.append(strip);
+  const an=d.analysis;const rec=node('div');for(const [c,act] of Object.entries(an.recolor||{}))rec.append(node('div',(RU[c]||c)+': '+(ACTION[act]||act)));
+  kv(panel('Решение анализа'),[['Аудитория',{female:'женская',male:'мужская',unisex:'унисекс'}[an.audience]||an.audience],['Цвет футболки продавца',RU[an.shirt_color]||an.shirt_color],['Перекраска',rec.childNodes.length?rec:null],['Серия шаблонов',an.frames&&an.frames.length?null:(an.series?((an.series.gender==='female'?'женская':'мужская')+' №'+an.series.number):null)],['Кадры из шаблонов',an.frames&&an.frames.length?an.frames.map((f,i)=>`${i+1}: серия ${f.series}, слот ${f.slot}${f.draw?'':' (спина, без принта)'}`).join('; '):null],['Почему такой порядок',an.frames_reason||null],['Почему отклонена',an.reasons.length?an.reasons.join('; '):null],['Соответствие теме',an.theme_reason]]);
+  if(Object.keys(d.prints).length||Object.keys(d.checks).length){const pb=panel('Принт и проверка');const s=node('div',undefined,'strip');
+    for(const [c,u] of Object.entries(d.prints))s.append(WB.photo(u,'для '+({white:'белой',black:'чёрной'}[c]||c)+' футболки','print '+c));pb.append(s);
+    for(const [k,v] of Object.entries(d.checks)){const c=node('div');c.style.margin='6px 0';c.append(node('b',(k==='base'?'вырезанный принт':(RU[k]||k)+' версия')+': '),WB.chip(v.accepted?'принят':'отклонён',v.accepted?'ok':'bad'));
+      if(d.print_attempts[k])c.append(node('span','попыток '+d.print_attempts[k],'hint'));if(v.text)c.append(node('pre','текст в файле: '+v.text,'text'));if(v.reason)c.append(node('div',v.reason,'hint'));pb.append(c)}}
+  if(Object.keys(d.images).length){const fb=panel('Кадры');for(const [c,list] of Object.entries(d.images)){fb.append(node('div',RU[c]||c,'hint'));const s=node('div',undefined,'strip');list.forEach((u,i)=>s.append(WB.photo(u,FRAME[i]||'кадр '+(i+1))));fb.append(s)}}
+  if(d.text&&d.text.title){const tb=panel('Название и описание');tb.append(node('b',d.text.title),node('p',d.text.description||'','hint'))}
+  const pubs=d.publications.map(x=>wbLinks(x.nm)).filter(Boolean);
+  kv(panel('WB'),[['Артикулы',Object.values(d.vendor_codes).join(', ')],['Проверка',d.approval==='approved'?'одобрена':(d.status==='done'?'ждёт решения':null)],['На WB',pubs[0]||(d.publications.length?'публикуется: '+d.publications.map(x=>(STATUS[x.status]||[x.status])[0]).join(', '):null)]]);
+  const ub=panel('Стоимость (usage)');
+  if(!d.usage.requests){ub.append(node('div','Запросов этой карточки в логе нет: лог usage ведётся с 06.11.','hint'))}
+  else{const t=node('table',undefined,'grid');for(const u of d.usage.by_purpose){const tr=node('tr');tr.append(node('td',PURPOSE[u.purpose]||u.purpose),node('td',u.n+' запр.'),node('td','$'+u.cost.toFixed(4)));t.append(tr)}
+    const tr=node('tr');tr.style.fontWeight='600';tr.append(node('td','Итого'),node('td',d.usage.requests+' запр.'),node('td','$'+d.usage.total.toFixed(4)));t.append(tr);ub.append(t)}
+}
+WB.start(()=>refresh(true));
+</script></html>

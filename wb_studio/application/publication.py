@@ -27,6 +27,11 @@ def product_url(nm_id) -> str:
     return f"https://www.wildberries.ru/catalog/{nm_id}/detail.aspx"
 
 
+def members_colors(cards) -> list:
+    """Fallback colors for split(): a card without vendor codes counts as its configured colors."""
+    return cards[0].payload.get("config", {}).get("colors", ["white", "black"])
+
+
 class Publications:
     def __init__(self, repository, env, publisher):
         self.repo = repository
@@ -71,6 +76,48 @@ class Publications:
         }
         external_id = "wb-publish-group:" + group if group else "wb-publish:" + card_id
         return self.repo.create(payload, product=PRODUCT, external_id=external_id)
+
+    # --- manual confirmation ---------------------------------------------------------
+
+    def review_queue(self) -> list[dict]:
+        """Finished cards not yet sent to WB, oldest first, light rows with their decision, if any."""
+        return self.repo.wb_review_rows()
+
+    def decide(self, card_id: str, approved: bool, reason: str = "") -> None:
+        """Approve a finished card for WB, or reject it for good.
+
+        A rejection is a permanent failure, exactly like an automatic one: the theme reserve replaces the print,
+        and auto-publication never picks it up.
+        """
+        card = self.repo.get(card_id)
+        if not card or card.product != PRODUCT or card.kind != JobKind.WB_CARD:
+            raise ValueError("Studio card not found")
+        if self.repo.wb_card_sent(card.id):
+            raise ValueError("Карточка уже отправлена на WB")
+        if not reviewed(card):
+            raise ValueError("Карточка ещё не готова к проверке")
+        if approved:
+            result = copy.deepcopy(card.result)
+            result["approval"] = "approved"
+            self.repo.complete(card.id, result)
+        else:
+            self.repo.fail(card.id, "PermanentError: Отклонено при ручной проверке" + (f": {reason}" if reason else ""))
+
+    def publish_approved(self) -> list:
+        """Every approved card not yet on WB goes out now, grouped by theme like the auto-publication."""
+        by_theme = collections.defaultdict(list)
+        for job in self.repo.wb_approved_cards():
+            by_theme[job.payload.get("campaign_id") or job.payload.get("merge_group") or job.id].append(job)
+        published = self.repo.wb_publication_groups()
+        created = []
+        for theme, cards in by_theme.items():
+            cards.sort(key=lambda m: m.design_number)
+            for members in self.split(cards, members_colors(cards)):
+                # Named by theme and first print: unique when later approvals of the theme go out.
+                group = f"PFWG-{theme}-a{members[0].design_number}"
+                if group not in published:
+                    created.append(self.create_publication(members[0].id, group, members))
+        return created
 
     # --- automatic publication ---------------------------------------------------
 

@@ -6,6 +6,7 @@ from collections.abc import Awaitable
 
 from printflow.domain.errors import PermanentError
 from printflow.wb_studio.domain.models import PRODUCT, vendor_codes
+from printflow.wb_studio.infrastructure import usage
 from printflow.wb_studio.infrastructure.generation import Generator
 from printflow.wb_studio.infrastructure.model_library import ModelLibrary
 from printflow.wb_studio.infrastructure.rendering.info_slides import check_information
@@ -67,6 +68,9 @@ class CardService:
             return result  # finished: nothing to redo, and its working files are already gone
         result.pop("failure", None)
         config = job.payload["config"]
+        # Every OpenAI request of this card is logged under it (usage.py), so a card's cost can be summed up.
+        usage.card.set({"job": job.id, "design": job.design_number, "theme": job.payload.get("theme"),
+                        "algorithm": config.get("algorithm")})  # fmt: skip
         generator = self.generator_override or Generator(self.env, config)
         if self.generator_override is None:
             check_information(config)

@@ -53,15 +53,6 @@ def on_gray(raw: bytes, fabric: str = "#bbbbbb") -> bytes:
     return jpeg(background)
 
 
-def on_fabric(raw: bytes, color: str) -> bytes:
-    """The print laid on its shirt color, opaque: the photo model ignores dark ink on a transparent PNG
-    and invents a foreign print instead (5/5 white frames of 5252, 2026-11-05); on the fabric it is copied."""
-    image = Image.open(io.BytesIO(raw)).convert("RGBA")
-    background = Image.new("RGBA", image.size, (255, 255, 255, 255) if color == "white" else (0, 0, 0, 255))
-    background.alpha_composite(image)
-    return png(background.convert("RGB"))
-
-
 def on_canvas(raw: bytes, ratio: float) -> bytes:
     """Print centered on a chromakey canvas of the output aspect, so the model has no reason to extend it."""
     image = Image.open(io.BytesIO(raw)).convert("RGBA")
@@ -86,3 +77,23 @@ def shrunk(raw: bytes, side: int) -> bytes:
         return raw
     image.thumbnail((side, side), Image.Resampling.LANCZOS)
     return png(image)
+
+
+COLLAGE_CELL = (512, 768)  # a 2:3 template photo in the input collage
+
+
+def collage(photos: list[bytes], cell: tuple[int, int] = COLLAGE_CELL) -> bytes:
+    """Four photos as a 2x2 collage, row by row: one image request draws all of them."""
+    sheet = Image.new("RGB", (cell[0] * 2, cell[1] * 2), "white")
+    for index, raw in enumerate(photos):
+        photo = Image.open(io.BytesIO(raw)).convert("RGB").resize(cell, Image.Resampling.LANCZOS)
+        sheet.paste(photo, ((index % 2) * cell[0], (index // 2) * cell[1]))
+    return png(sheet)
+
+
+def collage_cells(raw: bytes) -> list[bytes]:
+    """The four cells of a 2x2 collage, row by row, at the collage's own resolution."""
+    sheet = Image.open(io.BytesIO(raw)).convert("RGB")
+    width, height = sheet.size[0] // 2, sheet.size[1] // 2
+    boxes = [((i % 2) * width, (i // 2) * height, (i % 2 + 1) * width, (i // 2 + 1) * height) for i in range(4)]
+    return [png(sheet.crop(box)) for box in boxes]

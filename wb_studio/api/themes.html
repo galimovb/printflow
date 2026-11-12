@@ -1,0 +1,92 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WB Studio — темы</title>
+<link rel="stylesheet" href="/studio/wb/studio.css">
+<style>
+.catalog{max-height:520px;overflow:auto;border:1px solid var(--line2);border-radius:8px}
+.theme{display:grid;grid-template-columns:24px minmax(160px,280px) 1fr;gap:10px;align-items:center;padding:8px 10px;border-top:1px solid var(--line2);cursor:pointer}
+.theme:first-child{border-top:0}.theme:hover{background:var(--accent-hover)}.theme.off{cursor:default;opacity:.75}.theme.sel{background:var(--accent-soft)}
+@media(max-width:700px){.theme{grid-template-columns:24px 1fr}.theme .stats{grid-column:2}}
+</style>
+<header></header>
+<main>
+<div class="page-head"><h1>Темы</h1><span id="parser"></span></div>
+<section class="panel"><h2>Настройки запуска</h2>
+<div class="bar">
+<label>Карточек на тему <select id="count"><option>5</option><option>10</option><option>15</option><option selected>20</option></select></label>
+<label>Искать товаров <select id="search"><option>30</option><option selected>50</option><option>60</option></select></label>
+<label>Алгоритм <select id="algorithm"><option value="template_mockup" selected>Готовые шаблоны (template_mockup)</option><option value="source_redraw">Перерисовка фото продавца</option><option value="model_reference">Готовые модели</option></select></label>
+<label><input id="white" type="checkbox" checked> белая</label><label><input id="black" type="checkbox" checked> чёрная</label>
+</div>
+<p class="hint">Темы разбирает программа-парсер на этом компьютере (WB пускает только ваш Chrome): запустите <b>printflow\scripts\wb_parser.cmd</b> и держите окно открытым. Найденные сверх нужного количества товары идут в запас и заменяют отбракованные. На WB карточки уходят только после одобрения во вкладке «Проверка перед WB». Цена — около $0.17 за готовую карточку в двух цветах.</p>
+</section>
+<section class="panel"><h2>Темы из списка</h2>
+<div class="bar">
+<input id="find" type="search" placeholder="Поиск темы">
+<select id="show"><option value="all">Все темы</option><option value="new" selected>Ещё не запускались</option><option value="used">Уже запускались</option><option value="open">Ждут парсера</option></select>
+<button class="secondary" id="pick5">Выбрать 5 незапускавшихся</button><button class="secondary" id="clear">Снять выбор</button>
+<span class="grow"></span><span id="pickedCost" class="hint"></span><button id="addPicked" disabled>Поставить выбранные</button>
+</div>
+<p id="catalogSummary" class="hint"></p>
+<div class="catalog" id="catalog"></div>
+</section>
+<section class="panel"><h2>Свои темы</h2>
+<textarea id="themes" placeholder="футболка с лисой&#10;футболка формула 1"></textarea>
+<div class="bar" style="margin:10px 0 0"><button id="add">Поставить в очередь</button><span id="cost" class="hint"></span></div>
+</section>
+<section class="panel"><h2>По ссылкам WB</h2>
+<textarea id="urls" placeholder="https://www.wildberries.ru/catalog/123/detail.aspx"></textarea>
+<div class="bar" style="margin:10px 0 0"><button id="addUrls">Сделать карточки по ссылкам</button><span class="hint">до 20 ссылок, по одной в строке; алгоритм и цвета — из настроек выше</span></div>
+</section>
+<section class="panel flush"><h2>Очередь тем</h2><table class="grid"><thead><tr><th>№</th><th>Тема</th><th>Статус</th><th>Создана</th><th>Карточки</th><th></th></tr></thead><tbody id="list"></tbody></table></section>
+</main>
+<script src="/studio/wb/studio-common.js"></script>
+<script>
+const el=id=>document.getElementById(id),node=WB.node,api=WB.api;let catalog=[];const picked=new Set();
+const price=n=>`≈ $${(n*Number(el('count').value)*0.30).toFixed(0)}`;
+function settings(){return{count:Number(el('count').value),search:Number(el('search').value),algorithm:el('algorithm').value,colors:['white','black'].filter(x=>el(x).checked)}}
+/* --- catalog --- */
+const isOpen=t=>!!t.request,isUsed=t=>t.runs>0;
+function catalogSkeleton(){const box=el('catalog');box.replaceChildren();for(let i=0;i<8;i++){const r=node('div',undefined,'theme off');for(const w of [16,200,300]){const s=node('div',undefined,'sk');s.style.width=w+'px';r.append(s)}box.append(r)}}
+function renderCatalog(){const q=el('find').value.trim().toLowerCase(),show=el('show').value;
+const list=catalog.filter(t=>(!q||t.theme.toLowerCase().includes(q))&&(show==='all'||(show==='new'&&!isUsed(t)&&!isOpen(t))||(show==='used'&&isUsed(t))||(show==='open'&&isOpen(t))));
+const used=catalog.filter(t=>t.listed&&isUsed(t)).length,listed=catalog.filter(t=>t.listed).length;
+el('catalogSummary').textContent=`В списке ${listed} тем: запускались ${used}, ещё нет ${listed-used}. Показано: ${list.length}.`;
+const box=el('catalog');box.replaceChildren();if(!list.length){box.append(node('div','Ничего не найдено.','empty'));return}
+for(const t of list){const open=isOpen(t);const r=node('label',undefined,'theme'+(open?' off':'')+(picked.has(t.theme)?' sel':''));const cb=node('input');cb.type='checkbox';cb.disabled=open;cb.checked=picked.has(t.theme);
+cb.onchange=()=>{cb.checked?picked.add(t.theme):picked.delete(t.theme);r.classList.toggle('sel',cb.checked);updatePicked()};
+const name=node('div',t.theme);if(!t.listed)name.append(node('span',' не из списка','hint'));const s=node('div',undefined,'stats');
+if(open)s.append(WB.chip(t.request==='parsing'?'парсится':'ждёт парсера','info'));
+if(!isUsed(t)){if(!open)s.append(WB.chip('не запускалась','accent'))}else{s.append(WB.chip(`запускалась ${t.runs}× · ${WB.when(t.last_at)}`));
+if(t.on_wb)s.append(WB.chip('на WB: '+t.on_wb,'ok'));if(t.done-t.on_wb>0)s.append(WB.chip('готово, не на WB: '+(t.done-t.on_wb)));if(t.working)s.append(WB.chip('в работе: '+t.working,'info'));if(t.failed)s.append(WB.chip('отбраковано: '+t.failed,'bad'));if(t.errors)s.append(WB.chip('ошибка API: '+t.errors,'warn'))}
+r.append(cb,name,s);box.append(r)}}
+function updatePicked(){const n=picked.size;el('addPicked').disabled=!n;el('addPicked').textContent=n?`Поставить выбранные (${n})`:'Поставить выбранные';el('pickedCost').textContent=n?price(n)+` за ${n} тем`:''}
+el('find').oninput=renderCatalog;el('show').onchange=renderCatalog;
+el('pick5').onclick=()=>{let k=0;for(const t of catalog){if(k>=5)break;if(t.listed&&!isUsed(t)&&!isOpen(t)&&!picked.has(t.theme)){picked.add(t.theme);k++}}if(!k)WB.say('Незапускавшихся тем больше нет');renderCatalog();updatePicked()};
+el('clear').onclick=()=>{picked.clear();renderCatalog();updatePicked()};
+el('addPicked').onclick=()=>queue([...picked],el('addPicked'),()=>picked.clear());
+el('count').onchange=()=>{updatePicked();cost()};
+/* --- own themes --- */
+function cost(){const n=el('themes').value.split('\n').filter(x=>x.trim()).length;el('cost').textContent=n?price(n)+` за ${n} тем`:''}
+el('themes').oninput=cost;
+el('add').onclick=()=>queue(el('themes').value.split('\n').map(x=>x.trim()).filter(Boolean),el('add'),()=>{el('themes').value='';cost()});
+function queue(themes,button,after){if(!themes.length){WB.say('Выберите или впишите темы','error');return}const s=settings();if(!s.colors.length){WB.say('Выберите хотя бы один цвет','error');return}
+if(!confirm(`Поставить в очередь тем: ${themes.length}? Примерно ${price(themes.length)}.`))return;
+WB.busy(button,async()=>{const d=await api('/theme-requests',{themes,...s});after();WB.say(`Добавлено тем: ${d.added}`+(d.skipped?`, уже ждали парсера: ${d.skipped}`:''),'ok');await refresh()}).finally(updatePicked)}
+/* --- links --- */
+el('addUrls').onclick=()=>{const urls=el('urls').value.split('\n').map(x=>x.trim()).filter(Boolean);const s=settings();
+if(!urls.length){WB.say('Вставьте ссылки на карточки WB','error');return}if(!s.colors.length){WB.say('Выберите хотя бы один цвет','error');return}
+WB.busy(el('addUrls'),async()=>{await api('/urls',{urls,colors:s.colors,algorithm:s.algorithm});el('urls').value='';WB.say(`Ссылки поставлены в очередь: ${urls.length}. Смотрите вкладку «Очередь».`,'ok')})};
+/* --- request queue --- */
+const STATUS={waiting:['ждёт парсера','info'],parsing:['парсится','info'],queued:['в очереди','ok'],empty:['не найдено','bad'],failed:['ошибка','bad']};
+function renderRequests(data){const p=data.parser||{};el('parser').replaceChildren(node('span',p.online?('Парсер работает'+(p.current?' · сейчас: '+p.current:'')):'Парсер не запущен'+(p.seen_at?' · был '+WB.when(p.seen_at):''),'pill '+(p.online?'ok':'bad')));
+const b=el('list');if(!data.requests.length){WB.emptyRow(b,'Тем пока нет.',6);return}b.replaceChildren();
+for(const r of data.requests){const tr=node('tr');tr.append(node('td',r.number),node('td',r.theme));const [text,kind]=STATUS[r.status]||[r.status,''];const st=node('td');st.append(WB.chip(text,kind));if(r.message)st.append(node('div',r.message,r.status==='failed'?'error':'hint'));tr.append(st,node('td',WB.when(r.created_at),'muted'));
+const cards=node('td');const c=r.cards||{};for(const [k,label,kind2] of [['approved','одобрено','ok'],['done','ждут проверки','accent'],['running','в работе','info'],['pending','в очереди','warn'],['failed','отбраковано','bad'],['error','ошибка API','warn']])if(c[k])cards.append(WB.chip(label+': '+c[k],kind2));
+if(r.status==='queued'&&!Object.keys(c).length)cards.append(node('span','ещё не начаты','muted'));if(r.status!=='queued')cards.append(node('span',r.count+' из '+r.search,'hint'));tr.append(cards);
+const act=node('td');if(r.status==='waiting'){const x=node('button','Убрать','danger sm');x.onclick=()=>WB.busy(x,async()=>{await api('/theme-requests/'+r.id+'/cancel',{});await refresh()});act.append(x)}tr.append(act);b.append(tr)}}
+/* --- loading --- */
+let loaded=false;
+async function refresh(force){if(!loaded||force){catalogSkeleton();WB.skeletonRows(el('list'),[20,180,90,90,220,40],3)}
+try{const [requests,cat]=await Promise.all([api('/theme-requests'),api('/theme-catalog')]);renderRequests(requests);catalog=cat.themes;for(const t of catalog)if(isOpen(t))picked.delete(t.theme);renderCatalog();updatePicked();loaded=true}catch(e){WB.say(e.message,'error')}}
+WB.start(()=>refresh(true));setInterval(()=>{if(!document.hidden&&loaded)refresh()},20000);
+</script></html>

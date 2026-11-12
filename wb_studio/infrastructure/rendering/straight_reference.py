@@ -1,87 +1,43 @@
-"""Fold-free orthographic service templates; never a published gallery slide."""
+"""The flat reference shirt the photo model copies the print's size from; never a published gallery slide.
+
+The templates are our oversize shirt laid flat (assets/straight-oversize-v3, made by the image model from
+assets/garments/black.png on 2026-11-09, white from the black one). Measured on them: the body is 716 px across at
+the chest, taken as 54 cm; the front collar seam is lowest at y=472.
+"""
 
 import io
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from printflow.products.shopper.infrastructure.gallery.geometry import load_print
+from printflow.wb_studio.domain.print_box import print_size_cm
 from printflow.wb_studio.paths import ASSETS
 
-ROOT = ASSETS / "straight-regular-v2"
-SIZE = (1200, 1600)
-BODY = (276, 280, 924, 1120)  # 54 x 70 cm at 12 px/cm.
-
-
-def build_template(color):
-    if color not in ("white", "black"):
-        raise ValueError(color)
-    scale = 3
-    image = Image.new("RGB", (SIZE[0] * scale, SIZE[1] * scale), "#d8d8d8")
-    draw = ImageDraw.Draw(image)
-
-    def points(values):
-        return [(int(x * scale), int(y * scale)) for x, y in values]
-
-    fill = "#fafafa" if color == "white" else "#202020"
-    seam = "#d0d0d0" if color == "white" else "#4b4b4b"
-    outline = [
-        (470, 250),
-        (350, 280),
-        (276, 300),
-        (160, 405),
-        (225, 495),
-        (276, 455),
-        (276, 1120),
-        (924, 1120),
-        (924, 455),
-        (975, 495),
-        (1040, 405),
-        (924, 300),
-        (850, 280),
-        (730, 250),
-        (700, 285),
-        (660, 310),
-        (600, 320),
-        (540, 310),
-        (500, 285),
-    ]
-    draw.polygon(points(outline), fill=fill)
-    draw.line(points(outline + [outline[0]]), fill=seam, width=scale * 2)
-    for line in [
-        [(276, 1102), (924, 1102)],
-        [(170, 400), (234, 483)],
-        [(1030, 400), (966, 483)],
-        [(276, 455), (276, 1097)],
-        [(924, 455), (924, 1097)],
-    ]:
-        draw.line(points(line), fill=seam, width=scale * 2)
-    draw.arc((470 * scale, 210 * scale, 730 * scale, 340 * scale), 0, 180, fill=seam, width=scale * 9)
-    return image.resize(SIZE, Image.Resampling.LANCZOS)
+ROOT = ASSETS / "straight-oversize-v3"
+BODY_CM = (54, 74)  # chest width, neck point to hem
+PX_PER_CM = 716 / 54
+CENTER_X = 600
+FRONT_COLLAR_Y = 472
+PRINT_TOP_CM = 5  # below the front collar seam
 
 
 def prepare_straight_reference(art, color, config=None):
-    ROOT.mkdir(parents=True, exist_ok=True)
+    if color not in ("white", "black"):
+        raise ValueError(color)
     path = ROOT / f"{color}.png"
-    if not path.exists():
-        build_template(color).save(path)
     base = Image.open(path).convert("RGBA")
     artwork = load_print(io.BytesIO(art))
-    width = 30.0
-    height = width * artwork.height / artwork.width
-    if height > 39:
-        width *= 39 / height
-        height = 39.0
-    px = round(width * 12)
-    py = round(height * 12)
+    width, height = print_size_cm(artwork.width / artwork.height)
+    px, py = round(width * PX_PER_CM), round(height * PX_PER_CM)
     ink = artwork.convert("RGBA").resize((px, py), Image.Resampling.LANCZOS)
-    base.alpha_composite(ink, (600 - px // 2, 280 + 8 * 12))
+    base.alpha_composite(ink, (CENTER_X - px // 2, round(FRONT_COLLAR_Y + PRINT_TOP_CM * PX_PER_CM)))
     out = io.BytesIO()
     base.convert("RGB").save(out, format="PNG")
     return out.getvalue(), {
-        "body_cm": [54, 70],
+        "body_cm": list(BODY_CM),
         "width_cm": width,
         "height_cm": height,
-        "top_cm": 8,
+        "top_cm": PRINT_TOP_CM,
         "angle_degrees": 0,
         "template": str(path),
     }

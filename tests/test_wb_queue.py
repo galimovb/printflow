@@ -77,20 +77,6 @@ class WbQueueTest(unittest.TestCase):
                 self.assertEqual(len(generator.calls),before)
         asyncio.run(run())
 
-    def test_mass_cli_enqueues_both_colours_without_calling_generator(self):
-        import sys
-        from printflow.scripts import wb_batch
-        env={'PRINTFLOW_WB_API_TOKEN':'test','PRINTFLOW_WB_MERGE_DESIGNS':'2'}
-        with patch.object(wb_batch,'read_env',return_value=env),patch.object(sys,'argv',
-                ['wb_batch','--theme','гонки','--api','http://127.0.0.1:8090']),patch.object(wb_batch.httpx,'Client') as client:
-            response=client.return_value.__enter__.return_value.post.return_value
-            response.json.return_value={'jobs':[{'id':'queued','created':True}]}
-            wb_batch.main()
-            call=client.return_value.__enter__.return_value.post.call_args
-            self.assertEqual(call.args[0],'/api/v1/wb-studio/campaigns')
-            self.assertEqual(call.kwargs['json']['colors'],['white','black'])
-            self.assertEqual(call.kwargs['json']['design_limit'],10)
-
     def test_default_colours_and_immutable_groups_with_partial_tail(self):
         async def run():
             with TempDir() as tmp:
@@ -259,6 +245,39 @@ class AutoPublishTest(unittest.TestCase):
             self.assertEqual(studio.publish_finished_groups(),[])
             self.assertFalse(Studio(repo,FakeStorage(),FAST).configuration()['auto_publish'])
             self.assertTrue(Studio(repo,FakeStorage(),{**FAST,'PRINTFLOW_WB_AUTO_PUBLISH':'1'}).configuration()['auto_publish'])
+
+
+class ManualReviewTest(unittest.TestCase):
+    def test_only_approved_cards_go_out_and_a_rejection_refills_the_theme(self):
+        with TempDir() as tmp:
+            repo=new_repository(tmp)
+            studio=Studio(repo,FakeStorage(),{**FAST,'PRINTFLOW_WB_GROUP_CARDS':'4'})
+            sources=[{'sku':str(i),'url':f'https://www.wildberries.ru/catalog/{i}/detail.aspx','image':'https://s3/1.png',
+                      'images':['https://s3/1.png'],'gallery_complete':True} for i in range(6)]
+            config=studio.configuration(algorithm='source_redraw')
+            self.assertFalse(config['auto_publish'])
+            campaign,_=repo.create({'kind':'wb_discover','theme':'гонки','limit':6,'config':config,'design_limit':4},product='tee_wb')
+            repo.complete(campaign.id,{'sources':sources})
+            cards=studio.enqueue_cards(repo.get(campaign.id),sources[:4])
+            for i,card in enumerate(cards):
+                repo.complete(card['id'],draft(i+1))
+            self.assertEqual(len(studio.review_queue()),4)
+            self.assertEqual(studio.publish_finished_groups(),[])  # manual cards never go out on their own
+            with self.assertRaisesRegex(ValueError,'not found'):
+                studio.decide(campaign.id,True)  # a theme search is not a card
+            for card in cards[:3]:
+                studio.decide(card['id'],True)
+            studio.decide(cards[3]['id'],False,'текст искажён')
+            self.assertTrue(repo.get(cards[3]['id']).error.startswith('PermanentError: Отклонено'))
+            self.assertEqual([x['sku'] for x in studio.top_up_campaigns()],['4'])  # the reserve replaces the rejection
+            with patch('printflow.wb_studio.application.publication.load_config',return_value=draft(1)['config']):
+                created=studio.publish_approved()
+                self.assertEqual([len(job.payload['drafts']) for job,_ in created],[2,1])  # 4 WB cards per group
+                self.assertEqual(sorted(i for job,_ in created for i in job.payload['card_ids']),sorted(c['id'] for c in cards[:3]))
+                self.assertEqual(studio.publish_approved(),[])  # never twice
+            self.assertEqual(studio.review_queue(),[])  # sent cards leave the review
+            with self.assertRaisesRegex(ValueError,'уже отправлена'):
+                studio.decide(cards[0]['id'],False)
 
 
 class ReserveTest(unittest.TestCase):

@@ -34,11 +34,6 @@ class Storage:
         response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
         return await asyncio.to_thread(response["Body"].read)
 
-    def key_of(self, url: str, bucket: str) -> str | None:
-        """Ключ объекта по прямой ссылке этого бакета (url()) — или None, если ссылка чужая."""
-        prefix = f"{self.public_base}/{bucket}/"
-        return url[len(prefix):] if url.startswith(prefix) else None
-
     async def delete(self, bucket: str, keys: list[str]) -> int:
         """Удаляет объекты пачками по 1000 (лимит S3 DeleteObjects); возвращает число удалённых."""
         deleted = 0

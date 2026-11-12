@@ -12,7 +12,7 @@
 """
 
 from printflow.domain.errors import PermanentError
-from printflow.wb_studio.domain.print_tone import invert_flat
+from printflow.wb_studio.domain.print_tone import MIN_VANISHING_PIXELS, invert_flat, one_color_ink, vanishing_ink
 from printflow.wb_studio.domain.prompts import SCENE_KEYS
 from printflow.wb_studio.infrastructure.rendering.info_slides import info_slide
 from printflow.wb_studio.infrastructure.rendering.straight_reference import prepare_straight_reference
@@ -126,8 +126,13 @@ class RedrawPipeline:
                     attempts.pop(color, None)
                 self.files.save("print_extracted", result)
             base = await candidate("base")
+            await self.review_recolor(base, changes)
 
             async def recolor(color: str, base: bytes) -> None:
+                if changes.get(color) != "invert_flat" and one_color_ink(base) == ("dark" if color == "black" else "light"):
+                    # One flat ink that vanishes on this fabric: flipping it keeps every shape, free and exact.
+                    # The analysis sometimes asked for a redraw (unreadable dark blots, 5259) or for nothing.
+                    changes[color] = "invert_flat"
                 pending = color in candidates and checks.get(color, {}).get("accepted") is not False
                 if changes.get(color, "none") == "none" or color in variants or pending:
                     return
@@ -165,6 +170,36 @@ class RedrawPipeline:
                         continue
                     variants[color] = await self.files.put("prints", f"prints/{color}.png", raw)
             self.files.save("print_checked", result)
+
+    async def review_recolor(self, base: bytes, changes: dict) -> None:
+        """The analysis picks recolor actions from the seller photo; the extracted file decides whether they are needed
+        (once per extracted base). Code first: letters or lines of the fabric's own color lying on bare fabric vanish,
+        so that color is recolored whatever the analysis or the model says (5929: the model judged white letters on a
+        white shirt fine). Otherwise the model looks at the file on the fabric and may cancel a needless recolor."""
+        result = self.result
+        key = str(result.get("print_attempts", {}).get("base", 0))
+        if result.get("recolor_reviewed") == key:
+            return
+        review = result.setdefault("recolor_review", {})
+        asked = []
+        for color in self.config["colors"]:
+            action = changes.get(color, "none")
+            pixels = vanishing_ink(base, color)
+            if pixels >= MIN_VANISHING_PIXELS:
+                if action == "none":
+                    changes[color] = "lettering_and_outlines"
+                review[color] = {"asked": action, "vanishing_pixels": pixels, "kept": changes[color]}
+            elif action != "none":
+                asked.append(color)
+        if asked:
+            async with self.cards.photo_slots:
+                lost = await self.generator.recolor_needed(base, asked)
+            for color in asked:
+                review[color] = {"asked": changes[color], "lost": lost.get(color)}
+                if lost.get(color) is False:
+                    changes[color] = "none"
+        result["recolor_reviewed"] = key
+        self.files.save("recolor_reviewed", result)
 
     async def gallery(self, analysis: dict) -> None:
         """All frames of both colors at once; no automatic photo check, the card goes to manual review."""
